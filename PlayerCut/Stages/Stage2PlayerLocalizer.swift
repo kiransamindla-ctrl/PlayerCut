@@ -27,26 +27,36 @@ actor Stage2PlayerLocalizer {
         static let face: Float         = 0.20
     }
 
+    private let vision = VisionPipeline()
+    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    // Pause-until set by the orchestrator on critical memory pressure.
+    private var pauseUntil: Date?
+
+    // MARK: - Memory pressure
+
+    func pause(forSeconds seconds: TimeInterval) {
+        pauseUntil = Date().addingTimeInterval(seconds)
+        log.warning("Stage 2 paused for \(seconds, format: .fixed(precision: 0))s")
+    }
+
+    /// No pixel-buffer pools held here — FrameIterator's reader owns its
+    /// buffers and recycles them as it advances. Kept as a no-op for
+    /// symmetry with Stage 1 so the orchestrator can flush both uniformly.
+    func flushPools() { /* intentionally empty */ }
+
     func localize(in game: GameSession,
                   candidates: [CandidateWindow],
                   enrollment: PlayerEnrollment) async throws -> Stage2Result {
         let start = Date()
-        let asset = AVURLAsset(url: game.rawVideoURL)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.05,
-                                                        preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.05,
-                                                       preferredTimescale: 600)
-        generator.maximumSize = CGSize(width: 1280, height: 720) // analysis proxy
-
         var moments: [ScoredMoment] = []
 
         for window in candidates {
+            try await waitIfPaused()
             do {
                 if let moment = try await processWindow(window,
-                                                        enrollment: enrollment,
-                                                        generator: generator) {
+                                                        videoURL: game.rawVideoURL,
+                                                        enrollment: enrollment) {
                     moments.append(moment)
                 }
             } catch {
@@ -60,44 +70,53 @@ actor Stage2PlayerLocalizer {
                             processingDuration: Date().timeIntervalSince(start))
     }
 
+    private func waitIfPaused() async throws {
+        guard let until = pauseUntil, until > Date() else { return }
+        let delay = until.timeIntervalSinceNow
+        try await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+    }
+
     // MARK: - Per-window processing
 
     private func processWindow(_ window: CandidateWindow,
-                               enrollment: PlayerEnrollment,
-                               generator: AVAssetImageGenerator) async throws
+                               videoURL: URL,
+                               enrollment: PlayerEnrollment) async throws
         -> ScoredMoment? {
 
-        // Sample times within this window
+        // Stream the window's frames at 1280×720 via AVAssetReader rather
+        // than seek-per-frame with AVAssetImageGenerator.
+        let iterator = FrameIterator(url: videoURL)
+        try await iterator.seek(to: window.startTime,
+                                endTime: window.endTime,
+                                outputSize: CGSize(width: 1280, height: 720))
+        defer { Task { await iterator.cancel() } }
+
         let frameInterval = 1.0 / analysisFPS
-        var times: [CMTime] = []
-        var t = window.startTime
-        while t < window.endTime {
-            times.append(CMTime(seconds: t, preferredTimescale: 600))
-            t += frameInterval
-        }
+        var lastEmitted: Double = -.infinity
 
         var bestPlayerScores: [Float] = []
         var jointVelocities: [Float] = []
         var playerBoxes: [TimedBox] = []
         var lastBoxCenter: CGPoint?
 
-        for time in times {
-            let cgImage: CGImage
+        while let frame = await iterator.next() {
+            if frame.time - lastEmitted < frameInterval { continue }
+            lastEmitted = frame.time
+
+            // 1. Detect humans via the shared VisionPipeline actor.
+            let people: [VNHumanObservation]
             do {
-                cgImage = try await generator.image(at: time).image
+                people = try await vision.detectHumans(in: frame.buffer)
             } catch {
                 continue
             }
-
-            // 1. Detect humans in frame
-            let humanRequest = VNDetectHumanRectanglesRequest()
-            humanRequest.upperBodyOnly = false
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-            try handler.perform([humanRequest])
-            let people = humanRequest.results ?? []
             guard !people.isEmpty else { continue }
 
-            // 2. Score each detected person against enrollment
+            // Only realize a CGImage when we have humans to score —
+            // skips the convert cost on empty frames.
+            guard let cgImage = cgImage(from: frame.buffer) else { continue }
+
+            // 2. Score each detected person against enrollment.
             var bestScore: Float = 0
             var bestBox: CGRect?
 
@@ -113,9 +132,8 @@ actor Stage2PlayerLocalizer {
 
             if bestScore >= identificationThreshold, let box = bestBox {
                 bestPlayerScores.append(bestScore)
-                playerBoxes.append(TimedBox(time: time.seconds, box: box))
+                playerBoxes.append(TimedBox(time: frame.time, box: box))
 
-                // Track centroid velocity for activity score
                 let center = CGPoint(x: box.midX, y: box.midY)
                 if let last = lastBoxCenter {
                     let dx = Float(center.x - last.x)
@@ -204,19 +222,14 @@ actor Stage2PlayerLocalizer {
              + f * IdentificationWeights.face
     }
 
-    // Jersey number via VNRecognizeTextRequest with fuzzy match
+    // Jersey number via VisionPipeline's reused text request + fuzzy match.
     private func scoreJerseyNumber(in torso: CGImage, target: String) async -> Float {
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .fast
-        request.usesLanguageCorrection = false
-        request.recognitionLanguages = ["en-US"]
+        let observations: [VNRecognizedTextObservation]
         do {
-            let handler = VNImageRequestHandler(cgImage: torso, options: [:])
-            try handler.perform([request])
+            observations = try await vision.recognizeText(in: torso)
         } catch {
             return 0
         }
-        let observations = request.results ?? []
         var bestScore: Float = 0
         for obs in observations {
             guard let candidate = obs.topCandidates(1).first else { continue }
@@ -246,43 +259,25 @@ actor Stage2PlayerLocalizer {
 
     private func scoreFace(in personCrop: CGImage,
                            target: [Float]) async -> Float {
-        let detect = VNDetectFaceRectanglesRequest()
-        let handler = VNImageRequestHandler(cgImage: personCrop, options: [:])
+        let observation: VNFeaturePrintObservation?
         do {
-            try handler.perform([detect])
+            observation = try await vision.faceFeaturePrint(in: personCrop,
+                                                            minimumFaceSize: 24)
         } catch {
             return 0
         }
-        guard let face = detect.results?.first else { return 0 }
+        guard let observation else { return 0 }
 
-        // Face region within person crop
-        let pw = CGFloat(personCrop.width)
-        let ph = CGFloat(personCrop.height)
-        let faceRect = CGRect(
-            x: face.boundingBox.origin.x * pw,
-            y: (1 - face.boundingBox.origin.y - face.boundingBox.height) * ph,
-            width: face.boundingBox.width * pw,
-            height: face.boundingBox.height * ph
-        )
-        guard faceRect.width > 24, faceRect.height > 24,
-              let faceCrop = personCrop.cropping(to: faceRect) else { return 0 }
-
-        // Generate embedding (iOS 17+ API)
-        let embedRequest = VNGenerateImageFeaturePrintRequest()
-        let embedHandler = VNImageRequestHandler(cgImage: faceCrop, options: [:])
-        do {
-            try embedHandler.perform([embedRequest])
-        } catch {
-            return 0
-        }
-        guard let observation = embedRequest.results?.first as? VNFeaturePrintObservation else {
-            return 0
-        }
-
-        // Compare to target
         let candidate = observation.featureVector()
         guard candidate.count == target.count, !candidate.isEmpty else { return 0 }
         return cosineSimilarity(candidate, target)
+    }
+
+    // MARK: - Buffer → CGImage
+
+    private func cgImage(from buffer: CVPixelBuffer) -> CGImage? {
+        let ci = CIImage(cvPixelBuffer: buffer)
+        return ciContext.createCGImage(ci, from: ci.extent)
     }
 
     // MARK: - Helpers

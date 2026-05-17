@@ -21,6 +21,25 @@ actor PipelineOrchestrator {
 
     init(store: GameStore) {
         self.store = store
+        installMemoryPressureHandler()
+    }
+
+    /// Flush pixel pools and pause Stage 2 for 30s on `.critical` memory
+    /// pressure. Gives the system time to reclaim before we resume heavy
+    /// per-frame work.
+    private func installMemoryPressureHandler() {
+        let stage1 = self.stage1
+        let stage2 = self.stage2
+        let log = self.log
+        MemoryPressureMonitor.shared.addHandler { event in
+            guard event.contains(.critical) else { return }
+            log.warning("Critical memory pressure — flushing pools, pausing Stage 2 30s")
+            Task {
+                await stage1.flushPools()
+                await stage2.flushPools()
+                await stage2.pause(forSeconds: 30)
+            }
+        }
     }
 
     enum Progress: Sendable {

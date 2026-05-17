@@ -27,6 +27,19 @@ actor Stage1CoarseDetector {
 
     private let maxCandidates = 80
 
+    // 320×180 BGRA pool: we copy each FrameIterator output into a pool slot
+    // so the "previous" frame for optical flow stays valid even after the
+    // reader's internal buffer is recycled.
+    private let flowPool = PixelBufferPool(width: 320, height: 180)
+
+    // MARK: - Memory pressure
+
+    /// Releases pooled buffers. Called by the orchestrator on critical
+    /// memory-pressure events.
+    func flushPools() {
+        flowPool.flush()
+    }
+
     // MARK: - Entry point
 
     func detect(in game: GameSession) async throws -> Stage1Result {
@@ -121,42 +134,59 @@ actor Stage1CoarseDetector {
     private func detectMotionPeaks(videoURL: URL) async throws -> [CandidateWindow] {
         let asset = AVURLAsset(url: videoURL)
         let duration = try await asset.load(.duration).seconds
+
+        let iterator = FrameIterator(url: videoURL)
+        try await iterator.seek(to: 0,
+                                endTime: duration,
+                                outputSize: CGSize(width: 320, height: 180))
+
         let frameInterval = 1.0 / flowProxyFPS
-
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 320, height: 180)
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.05, preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.05, preferredTimescale: 600)
-
-        var times: [CMTime] = []
-        var t = 0.0
-        while t < duration {
-            times.append(CMTime(seconds: t, preferredTimescale: 600))
-            t += frameInterval
-        }
-
+        var lastEmittedTime: Double = -.infinity
         var previousPixelBuffer: CVPixelBuffer?
         var magnitudes: [(time: Double, mag: Float)] = []
 
-        for time in times {
-            let cgImage: CGImage
-            do {
-                cgImage = try await generator.image(at: time).image
-            } catch {
-                continue
-            }
-            let pixelBuffer = try makePixelBuffer(from: cgImage)
+        while let frame = await iterator.next() {
+            if frame.time - lastEmittedTime < frameInterval { continue }
+            lastEmittedTime = frame.time
+
+            // Copy into a pooled 320x180 slot. The reader's buffer is
+            // owned by AVAssetReader and may be recycled the moment we
+            // call next() again; the pool gives us a stable buffer we can
+            // hand to the next iteration as "previous".
+            let current = copyToPool(frame.buffer) ?? frame.buffer
 
             if let prev = previousPixelBuffer {
-                let mag = try await opticalFlowMagnitude(from: prev, to: pixelBuffer)
-                magnitudes.append((time.seconds, mag))
+                let mag = try await opticalFlowMagnitude(from: prev, to: current)
+                magnitudes.append((frame.time, mag))
             }
-            previousPixelBuffer = pixelBuffer
+            previousPixelBuffer = current
         }
+        await iterator.cancel()
         log.info("Stage 1 flow: \(magnitudes.count) frames analyzed")
 
         return findFlowPeaks(magnitudes)
+    }
+
+    private func copyToPool(_ source: CVPixelBuffer) -> CVPixelBuffer? {
+        guard let dest = flowPool.acquire() else { return nil }
+        CVPixelBufferLockBaseAddress(source, .readOnly)
+        CVPixelBufferLockBaseAddress(dest, [])
+        defer {
+            CVPixelBufferUnlockBaseAddress(dest, [])
+            CVPixelBufferUnlockBaseAddress(source, .readOnly)
+        }
+        guard let src = CVPixelBufferGetBaseAddress(source),
+              let dst = CVPixelBufferGetBaseAddress(dest) else { return nil }
+        let srcRow = CVPixelBufferGetBytesPerRow(source)
+        let dstRow = CVPixelBufferGetBytesPerRow(dest)
+        let height = CVPixelBufferGetHeight(source)
+        let copyRow = min(srcRow, dstRow)
+        for y in 0..<height {
+            memcpy(dst.advanced(by: y * dstRow),
+                   src.advanced(by: y * srcRow),
+                   copyRow)
+        }
+        return dest
     }
 
     private func opticalFlowMagnitude(from prev: CVPixelBuffer,
@@ -255,37 +285,4 @@ actor Stage1CoarseDetector {
         return merged
     }
 
-    // MARK: - Helpers
-
-    private func makePixelBuffer(from cgImage: CGImage) throws -> CVPixelBuffer {
-        let width = cgImage.width
-        let height = cgImage.height
-        var pixelBuffer: CVPixelBuffer?
-        let attrs: [CFString: Any] = [
-            kCVPixelBufferCGImageCompatibilityKey: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey: true
-        ]
-        let status = CVPixelBufferCreate(kCFAllocatorDefault,
-                                         width, height,
-                                         kCVPixelFormatType_32BGRA,
-                                         attrs as CFDictionary,
-                                         &pixelBuffer)
-        guard status == kCVReturnSuccess, let buffer = pixelBuffer else {
-            throw PipelineError.stage1Failed("Pixel buffer alloc")
-        }
-        CVPixelBufferLockBaseAddress(buffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
-
-        let context = CGContext(
-            data: CVPixelBufferGetBaseAddress(buffer),
-            width: width, height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
-                | CGBitmapInfo.byteOrder32Little.rawValue
-        )
-        context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return buffer
-    }
 }
