@@ -29,6 +29,7 @@ struct PlayerCutApp: App {
 final class AppCoordinator: ObservableObject {
     let store = GameStore()
     lazy var orchestrator = PipelineOrchestrator(store: store)
+    let captureController = GameCaptureController()
 
     @Published var games: [GameSession] = []
     @Published var players: [PlayerEnrollment] = []
@@ -56,18 +57,116 @@ final class AppCoordinator: ObservableObject {
     }
 }
 
+// MARK: - Root
+
 struct RootView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @State private var presentingEnrollment = false
+    @State private var presentingCapture = false
+
     var body: some View {
-        // Stub UI — production would show enrollment, capture, history
         NavigationStack {
-            List(coordinator.games, id: \.id) { game in
-                VStack(alignment: .leading) {
-                    Text(game.startedAt.formatted())
-                    Text(game.status.rawValue).foregroundStyle(.secondary)
+            Group {
+                if coordinator.players.isEmpty {
+                    emptyState
+                } else {
+                    populatedList
                 }
             }
             .navigationTitle("PlayerCut")
+            .toolbar {
+                if !coordinator.players.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            presentingCapture = true
+                        } label: {
+                            Label("Record game", systemImage: "record.circle")
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $presentingEnrollment) {
+                EnrollmentRootView(
+                    vm: EnrollmentViewModel(store: coordinator.store),
+                    onComplete: { _ in
+                        presentingEnrollment = false
+                        Task { await coordinator.refresh() }
+                    },
+                    onCancel: { presentingEnrollment = false }
+                )
+            }
+            .fullScreenCover(isPresented: $presentingCapture) {
+                if let player = coordinator.players.first {
+                    CaptureView(player: player)
+                        .environmentObject(coordinator)
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 20) {
+            Spacer()
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 72))
+                .foregroundStyle(.secondary)
+            Text("No players yet")
+                .font(.title2)
+            Button {
+                presentingEnrollment = true
+            } label: {
+                Text("Enroll a player")
+                    .font(.title3.bold())
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.horizontal, 32)
+            Spacer()
+        }
+    }
+
+    private var populatedList: some View {
+        List {
+            Section("Players") {
+                ForEach(coordinator.players, id: \.id) { player in
+                    HStack {
+                        Text(player.name).font(.body)
+                        Spacer()
+                        Text("#\(player.jerseyNumber)")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Button {
+                    presentingEnrollment = true
+                } label: {
+                    Label("Add another player", systemImage: "plus")
+                }
+            }
+
+            Section("Games") {
+                if coordinator.games.isEmpty {
+                    Text("No games yet — tap Record to start.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(coordinator.games, id: \.id) { game in
+                        NavigationLink {
+                            GameDetailView(gameID: game.id)
+                                .environmentObject(coordinator)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(game.startedAt.formatted(
+                                    date: .abbreviated, time: .shortened))
+                                Text(game.status.rawValue)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

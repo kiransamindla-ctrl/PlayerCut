@@ -16,7 +16,10 @@ final class GameCaptureController: NSObject {
 
     private let log = Logger(subsystem: "com.playercut.app", category: "Capture")
 
-    private let session = AVCaptureSession()
+    private let _session = AVCaptureSession()
+    /// Read-only handle so a SwiftUI preview layer can attach. Don't mutate
+    /// the session from outside — that's the controller's job.
+    var session: AVCaptureSession { _session }
     private let videoOutput = AVCaptureMovieFileOutput()
     private let audioDataOutput = AVCaptureAudioDataOutput()
 

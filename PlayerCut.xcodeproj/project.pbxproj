@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		044E3F26F254BBF88FC025F0 /* PipelineOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3EADFF688E91ADCEBE5E4BC /* PipelineOrchestrator.swift */; };
+		060932B18D1FBAE3BDB8CFE3 /* GameDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B942A1811EDCD3B97ADF0516 /* GameDetailView.swift */; };
 		1C48996C7F483E9693707056 /* PixelBufferPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C24C5163D5195F4DEDE1C1 /* PixelBufferPool.swift */; };
 		1DF8E171D165ADB0303F2654 /* Stage2PlayerLocalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4860CE2164ADF75EB19A533A /* Stage2PlayerLocalizer.swift */; };
 		2BECEA58E472B80596F89F87 /* GameCaptureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EFEA6919A4C1A6B3FA4E4E0 /* GameCaptureController.swift */; };
@@ -21,6 +22,7 @@
 		77AC3FA3FD3BFEE9753A8DBE /* VisionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCC38D5C5EAD3E535D6E04E /* VisionPipeline.swift */; };
 		812C3853AFDB715B9AD1938E /* EnrollmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 608D09E55BF686A8910AF245 /* EnrollmentViews.swift */; };
 		85DCFCCA63858A8469FDE82E /* PlayerCutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0F8A80B4A9C591C60B82B5 /* PlayerCutTests.swift */; };
+		95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24D4CA15A14D5F147D77A85 /* CaptureView.swift */; };
 		973D37FB0B8590D6F3869DDA /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36946E4469D60B7F569114E3 /* Storage.swift */; };
 		98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */; };
 		AAFAFC89E3DAF7A44493BBDB /* ReelComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */; };
@@ -59,7 +61,9 @@
 		8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerCutApp.swift; sourceTree = "<group>"; };
 		99CD75C3C4488657399E44F3 /* DiagnosticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsStore.swift; sourceTree = "<group>"; };
 		AE892148703051040369F4C6 /* PlayerCutTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlayerCutTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B24D4CA15A14D5F147D77A85 /* CaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureView.swift; sourceTree = "<group>"; };
 		B4ABAD3A6EB6390A240D3D85 /* Stage1CoarseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stage1CoarseDetector.swift; sourceTree = "<group>"; };
+		B942A1811EDCD3B97ADF0516 /* GameDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameDetailView.swift; sourceTree = "<group>"; };
 		B99F55F63E923EEF3B3AC8B4 /* EvaluationHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvaluationHarness.swift; sourceTree = "<group>"; };
 		BC6C46A8E3983A9FFBD64A11 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CA0F8A80B4A9C591C60B82B5 /* PlayerCutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerCutTests.swift; sourceTree = "<group>"; };
@@ -129,6 +133,7 @@
 		6BDEE8DCC9FD448CE0617D8F /* Pipeline */ = {
 			isa = PBXGroup;
 			children = (
+				B942A1811EDCD3B97ADF0516 /* GameDetailView.swift */,
 				DE476586888DDD7EBAF974F7 /* HighlightRanker.swift */,
 				D3EADFF688E91ADCEBE5E4BC /* PipelineOrchestrator.swift */,
 			);
@@ -203,6 +208,7 @@
 		D54D50EF72370D4492360F1B /* Capture */ = {
 			isa = PBXGroup;
 			children = (
+				B24D4CA15A14D5F147D77A85 /* CaptureView.swift */,
 				6EFEA6919A4C1A6B3FA4E4E0 /* GameCaptureController.swift */,
 			);
 			path = Capture;
@@ -282,6 +288,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					419CE32CDB2D87A31B5DA2ED = {
+						DevelopmentTeam = NFA3VW6VKZ;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -313,6 +320,7 @@
 			files = (
 				B44DA133B9F50C367362F926 /* BackgroundProcessing.swift in Sources */,
 				77293FA0F97806539B9CD4ED /* BackgroundProcessingV2.swift in Sources */,
+				95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */,
 				47564E71FFC18A092E06FD93 /* CoreModels.swift in Sources */,
 				2BEDCCAC18BE9C3410B7C192 /* DiagnosticsStore.swift in Sources */,
 				DB19202F0F7C740BCF51A698 /* DiagnosticsView.swift in Sources */,
@@ -321,6 +329,7 @@
 				C9884D22FDD42935BA622E96 /* EvaluationHarness.swift in Sources */,
 				535FDD39ADCF51F41CB3CBE3 /* FrameIterator.swift in Sources */,
 				2BECEA58E472B80596F89F87 /* GameCaptureController.swift in Sources */,
+				060932B18D1FBAE3BDB8CFE3 /* GameDetailView.swift in Sources */,
 				64C548F37D75D1160461F9EC /* HighlightRanker.swift in Sources */,
 				BDB2E933B46DDE3FF5DC5B1F /* JerseyOCR.swift in Sources */,
 				5EB45B86F5AF7896651CC407 /* LabeledCorpus.swift in Sources */,
@@ -437,6 +446,7 @@
 				CODE_SIGN_ENTITLEMENTS = PlayerCut/PlayerCut.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = NFA3VW6VKZ;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PlayerCut/Info.plist;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -457,6 +467,7 @@
 				CODE_SIGN_ENTITLEMENTS = PlayerCut/PlayerCut.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = NFA3VW6VKZ;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PlayerCut/Info.plist;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
