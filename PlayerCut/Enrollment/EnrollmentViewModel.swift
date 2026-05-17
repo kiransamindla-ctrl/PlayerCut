@@ -245,6 +245,7 @@ final class EnrollmentViewModel: ObservableObject {
         do {
             try await store.upsert(player)
             savedPlayerID = player.id
+            await DiagnosticsStore.shared.recordDailyEvent(.enrollmentCompleted)
             return true
         } catch {
             validationError = "Couldn't save: \(error.localizedDescription)"

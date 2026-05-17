@@ -58,16 +58,24 @@ actor PipelineOrchestrator {
              musicURL: URL?) -> AsyncStream<Progress> {
         AsyncStream { continuation in
             Task {
+                let pipelineStart = Date()
                 do {
                     var game = try await self.store.game(id: gameId)
                     let player = try await self.store.player(id: game.playerId)
+
+                    await DiagnosticsStore.shared.recordDailyEvent(.appOpened)
+                    await DiagnosticsStore.shared.recordEnum(.sport, value: game.sport)
 
                     // Stage 1
                     continuation.yield(.stage1Started)
                     game.status = .stage1Running
                     try await self.store.upsert(game)
 
+                    let stage1Start = Date()
                     let stage1Result = try await self.stage1.detect(in: game)
+                    await DiagnosticsStore.shared.recordDuration(
+                        .stage1,
+                        seconds: Date().timeIntervalSince(stage1Start))
                     game.stage1Result = stage1Result
                     try await self.store.upsert(game)
                     continuation.yield(.stage1Completed(
@@ -79,17 +87,25 @@ actor PipelineOrchestrator {
                     continuation.yield(.stage2Started(
                         totalWindows: stage1Result.candidates.count))
 
+                    let stage2Start = Date()
                     let stage2Result = try await self.stage2.localize(
                         in: game,
                         candidates: stage1Result.candidates,
                         enrollment: player)
+                    await DiagnosticsStore.shared.recordDuration(
+                        .stage2,
+                        seconds: Date().timeIntervalSince(stage2Start))
                     game.stage2Result = stage2Result
                     try await self.store.upsert(game)
                     continuation.yield(.stage2Completed(
                         momentCount: stage2Result.moments.count))
 
                     // Ranking
+                    let rankingStart = Date()
                     let plan = self.ranker.selectClips(from: stage2Result.moments)
+                    await DiagnosticsStore.shared.recordDuration(
+                        .ranking,
+                        seconds: Date().timeIntervalSince(rankingStart))
                     continuation.yield(.rankingCompleted(clipCount: plan.selected.count))
 
                     if plan.selected.count < 4 {
@@ -105,18 +121,40 @@ actor PipelineOrchestrator {
                     let outputURL = StoragePaths
                         .gameDirectory(for: game.id)
                         .appendingPathComponent("reel.mp4")
+                    let composeStart = Date()
                     let url = try await self.composer.compose(plan: plan,
                                                               game: game,
                                                               player: player,
                                                               musicURL: musicURL,
                                                               outputURL: outputURL)
+                    await DiagnosticsStore.shared.recordDuration(
+                        .composition,
+                        seconds: Date().timeIntervalSince(composeStart))
                     game.exportedReelURL = url
                     game.status = .completed
                     try await self.store.upsert(game)
 
+                    await DiagnosticsStore.shared.increment(.reelsCompleted)
+                    await DiagnosticsStore.shared.recordDuration(
+                        .totalPipeline,
+                        seconds: Date().timeIntervalSince(pipelineStart))
+
                     continuation.yield(.completed(reelURL: url))
                 } catch {
                     self.log.error("Pipeline failed: \(error.localizedDescription)")
+                    await DiagnosticsStore.shared.increment(.reelsFailed)
+                    if let pe = error as? PipelineError {
+                        switch pe {
+                        case .captureFailed:
+                            await DiagnosticsStore.shared.increment(.errorCaptureFailed)
+                        case .compositionFailed:
+                            await DiagnosticsStore.shared.increment(.errorComposeFailed)
+                        default:
+                            await DiagnosticsStore.shared.increment(.errorPipelineFailed)
+                        }
+                    } else {
+                        await DiagnosticsStore.shared.increment(.errorPipelineFailed)
+                    }
                     continuation.yield(.failed(error))
                 }
                 continuation.finish()

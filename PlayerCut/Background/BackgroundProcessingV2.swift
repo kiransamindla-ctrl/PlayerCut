@@ -157,6 +157,9 @@ final class BackgroundProcessingV2 {
             try BGTaskScheduler.shared.submit(processing)
             try BGTaskScheduler.shared.submit(refresh)
             log.info("Submitted BG processing + refresh requests")
+            // One per successful submit() call — keeps the counter
+            // proportional to scheduler load, not just to enqueue events.
+            Task { await DiagnosticsStore.shared.increment(.bgTaskSubmitted, by: 2) }
         } catch BGTaskScheduler.Error.unavailable {
             log.error("BG tasks unavailable on this device")
         } catch BGTaskScheduler.Error.tooManyPendingTaskRequests {
@@ -174,6 +177,7 @@ final class BackgroundProcessingV2 {
         defer { signposter.endInterval("BGProcessing", interval) }
 
         log.info("BGProcessingTask invoked; queue size \(self.queue.count)")
+        Task { await DiagnosticsStore.shared.increment(.bgTaskHandled) }
 
         guard let gameID = queue.first else {
             task.setTaskCompleted(success: true)
@@ -191,6 +195,7 @@ final class BackgroundProcessingV2 {
                 // progress is on disk by the time this returns.
                 task.setTaskCompleted(success: false)
             }
+            Task { await DiagnosticsStore.shared.increment(.bgTaskExpired) }
         }
 
         // Run the pipeline. If iOS lets us complete, great. If it expires,
@@ -274,6 +279,7 @@ final class BackgroundProcessingV2 {
                 if success {
                     queue.removeAll { $0 == next }
                     saveQueue()
+                    Task { await DiagnosticsStore.shared.increment(.foregroundFallbackCompleted) }
                 } else {
                     // If we failed in foreground, don't loop forever — let
                     // the user retry manually or wait for next BG window.

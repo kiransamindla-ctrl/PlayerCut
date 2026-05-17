@@ -161,6 +161,12 @@ final class GameCaptureController: NSObject {
             session.stopRunning()
         }
         log.info("Recording stopped: \(game.id.uuidString), \(self.loudnessSamples.count) loudness samples")
+
+        await DiagnosticsStore.shared.increment(.gamesRecorded)
+        await DiagnosticsStore.shared.recordDuration(
+            .captureSession,
+            seconds: Date().timeIntervalSince(game.startedAt))
+
         return game
     }
 }
