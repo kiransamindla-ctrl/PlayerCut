@@ -44,11 +44,13 @@ actor Stage1CoarseDetector {
 
     func detect(in game: GameSession) async throws -> Stage1Result {
         let startedAt = Date()
+        log.info("Stage 1 detect: starting")
 
         async let audio = detectAudioPeaks(loudnessURL: game.audioLoudnessURL)
         async let motion = detectMotionPeaks(videoURL: game.rawVideoURL)
 
         let audioWindows = try await audio
+        log.info("Stage 1 detect: audio done (\(audioWindows.count) windows)")
         let motionWindows = try await motion
         log.info("Stage 1: \(audioWindows.count) audio + \(motionWindows.count) motion windows")
 
@@ -66,9 +68,11 @@ actor Stage1CoarseDetector {
     // MARK: - Audio
 
     private func detectAudioPeaks(loudnessURL: URL) async throws -> [CandidateWindow] {
+        log.info("Stage 1 audio: reading loudness file")
         let data = try Data(contentsOf: loudnessURL)
         let samples = try JSONDecoder().decode([GameCaptureController.LoudnessSample].self,
                                                from: data)
+        log.info("Stage 1 audio: \(samples.count) loudness samples")
         guard samples.count > 20 else { return [] }
 
         let sampleRateHz = Double(samples.count) /
@@ -132,8 +136,10 @@ actor Stage1CoarseDetector {
     // MARK: - Optical flow on a 320x180 proxy
 
     private func detectMotionPeaks(videoURL: URL) async throws -> [CandidateWindow] {
+        log.info("Stage 1 motion: loading asset")
         let asset = AVURLAsset(url: videoURL)
         let duration = try await asset.load(.duration).seconds
+        log.info("Stage 1 motion: duration=\(duration, format: .fixed(precision: 1))s, starting decode")
 
         let iterator = FrameIterator(url: videoURL)
         try await iterator.seek(to: 0,
@@ -144,8 +150,14 @@ actor Stage1CoarseDetector {
         var lastEmittedTime: Double = -.infinity
         var previousPixelBuffer: CVPixelBuffer?
         var magnitudes: [(time: Double, mag: Float)] = []
+        var decoded = 0
+        let progressEvery = 60   // log roughly every 2s of source video at 30fps
 
         while let frame = await iterator.next() {
+            decoded += 1
+            if decoded % progressEvery == 0 {
+                log.info("Stage 1 motion: decoded=\(decoded), flow pairs=\(magnitudes.count), at t=\(frame.time, format: .fixed(precision: 1))s")
+            }
             if frame.time - lastEmittedTime < frameInterval { continue }
             lastEmittedTime = frame.time
 
@@ -162,7 +174,7 @@ actor Stage1CoarseDetector {
             previousPixelBuffer = current
         }
         await iterator.cancel()
-        log.info("Stage 1 flow: \(magnitudes.count) frames analyzed")
+        log.info("Stage 1 flow: \(magnitudes.count) frames analyzed (decoded \(decoded) total)")
 
         return findFlowPeaks(magnitudes)
     }
