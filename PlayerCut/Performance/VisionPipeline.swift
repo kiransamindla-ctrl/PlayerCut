@@ -71,8 +71,8 @@ actor VisionPipeline {
         return r
     }()
 
-    private let featurePrintRequest: VNGenerateObjectFeaturePrintRequest = {
-        let r = VNGenerateObjectFeaturePrintRequest()
+    private let featurePrintRequest: VNGenerateImageFeaturePrintRequest = {
+        let r = VNGenerateImageFeaturePrintRequest()
         r.preferBackgroundProcessing = true
         return r
     }()

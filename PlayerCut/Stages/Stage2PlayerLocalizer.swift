@@ -179,8 +179,8 @@ actor Stage2PlayerLocalizer {
 
         async let colorScore: Float = {
             guard let torso = torsoCrop else { return 0 }
-            return self.scoreJerseyColor(in: torso,
-                                         target: enrollment.jerseyColorHSV)
+            return await self.scoreJerseyColor(in: torso,
+                                               target: enrollment.jerseyColorHSV)
         }()
 
         async let faceScore: Float = scoreFace(in: personCrop,
@@ -268,7 +268,7 @@ actor Stage2PlayerLocalizer {
               let faceCrop = personCrop.cropping(to: faceRect) else { return 0 }
 
         // Generate embedding (iOS 17+ API)
-        let embedRequest = VNGenerateObjectFeaturePrintRequest()
+        let embedRequest = VNGenerateImageFeaturePrintRequest()
         let embedHandler = VNImageRequestHandler(cgImage: faceCrop, options: [:])
         do {
             try embedHandler.perform([embedRequest])

@@ -202,11 +202,11 @@ final class EnrollmentViewModel: ObservableObject {
                 return
             }
 
-            // 4. Generate embedding via VNGenerateObjectFeaturePrintRequest.
-            // There is no public face-specific embedding API; using object
+            // 4. Generate embedding via VNGenerateImageFeaturePrintRequest.
+            // There is no public face-specific embedding API; using image
             // feature prints on a face crop is the documented workaround
             // and works well enough for "is this the same kid?" matching.
-            let printReq = VNGenerateObjectFeaturePrintRequest()
+            let printReq = VNGenerateImageFeaturePrintRequest()
             let printHandler = VNImageRequestHandler(cgImage: faceCrop, options: [:])
             try printHandler.perform([printReq])
             guard let observation = printReq.results?.first as? VNFeaturePrintObservation else {
