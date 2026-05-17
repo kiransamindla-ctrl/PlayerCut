@@ -12,10 +12,27 @@
 //
 
 import Foundation
+import ImageIO
 import SwiftUI
 import UIKit
 import Vision
 import os.log
+
+extension CGImagePropertyOrientation {
+    init(_ uiOrientation: UIImage.Orientation) {
+        switch uiOrientation {
+        case .up: self = .up
+        case .upMirrored: self = .upMirrored
+        case .down: self = .down
+        case .downMirrored: self = .downMirrored
+        case .left: self = .left
+        case .leftMirrored: self = .leftMirrored
+        case .right: self = .right
+        case .rightMirrored: self = .rightMirrored
+        @unknown default: self = .up
+        }
+    }
+}
 
 @MainActor
 final class EnrollmentViewModel: ObservableObject {
@@ -147,14 +164,20 @@ final class EnrollmentViewModel: ObservableObject {
             faceQualityIssues = [.noFaceFound]
             return
         }
-        await extractFace(from: cgImage)
+        let orientation = CGImagePropertyOrientation(image.imageOrientation)
+        await extractFace(from: cgImage, orientation: orientation)
     }
 
-    private func extractFace(from cgImage: CGImage) async {
+    private func extractFace(from cgImage: CGImage,
+                             orientation: CGImagePropertyOrientation) async {
         do {
-            // 1. Find faces.
+            // 1. Find faces. Pass the source orientation so Vision can rotate
+            // the bitmap into the expected upright frame — without this, a
+            // portrait selfie may be analyzed sideways and confidence tanks.
             let faceRequest = VNDetectFaceRectanglesRequest()
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+            let handler = VNImageRequestHandler(cgImage: cgImage,
+                                                orientation: orientation,
+                                                options: [:])
             try handler.perform([faceRequest])
             let faces = faceRequest.results ?? []
 
@@ -169,10 +192,16 @@ final class EnrollmentViewModel: ObservableObject {
             let face = faces[0]
 
             // 2. Quality gates.
-            let pw = CGFloat(cgImage.width)
-            let ph = CGFloat(cgImage.height)
-            let faceWidth = face.boundingBox.width * pw
-            let faceHeight = face.boundingBox.height * ph
+            //
+            // Vision reports boundingBox in the *oriented* coordinate space,
+            // so width/height correspond to the upright image dimensions. We
+            // compute those from cgImage + orientation rather than raw
+            // cgImage.width/height, which can be swapped for portrait shots.
+            let (orientedW, orientedH) = orientedExtent(of: cgImage,
+                                                        orientation: orientation)
+            let faceWidth = face.boundingBox.width * orientedW
+            let faceHeight = face.boundingBox.height * orientedH
+            log.info("Face: confidence=\(face.confidence) size=\(Int(faceWidth))x\(Int(faceHeight)) image=\(Int(orientedW))x\(Int(orientedH))")
 
             if faceWidth < 120 || faceHeight < 120 {
                 // 120 px is the rough minimum for reliable feature prints.
@@ -180,22 +209,30 @@ final class EnrollmentViewModel: ObservableObject {
                 faceQualityIssues = [.faceTooSmall]
                 return
             }
-            if face.confidence < 0.85 {
+            // VNDetectFaceRectanglesRequest's confidence is conservative —
+            // even crisp, well-lit selfies frequently land in 0.5–0.8.
+            // 0.4 keeps obvious garbage out without rejecting real faces.
+            if face.confidence < 0.4 {
                 faceQualityIssues = [.lowConfidence]
                 return
             }
 
-            // 3. Crop face region with a 20% margin (Vision's default crop is
-            // tight on the face; including a bit of forehead and chin
-            // produces more stable embeddings).
+            // 3. Crop face region with a 20% margin from the raw cgImage.
+            // We compute the crop in raw bitmap coordinates by un-rotating
+            // the bounding box back through the orientation transform.
+            let rawRect = boundingBoxInRawPixels(face.boundingBox,
+                                                 orientation: orientation,
+                                                 cgImage: cgImage)
             let margin: CGFloat = 0.20
-            let mw = face.boundingBox.width * margin
-            let mh = face.boundingBox.height * margin
+            let mw = rawRect.width * margin
+            let mh = rawRect.height * margin
             let expandedRect = CGRect(
-                x: max(0, (face.boundingBox.origin.x - mw) * pw),
-                y: max(0, (1 - face.boundingBox.origin.y - face.boundingBox.height - mh) * ph),
-                width: min(pw, (face.boundingBox.width + 2 * mw) * pw),
-                height: min(ph, (face.boundingBox.height + 2 * mh) * ph)
+                x: max(0, rawRect.minX - mw),
+                y: max(0, rawRect.minY - mh),
+                width: min(CGFloat(cgImage.width) - max(0, rawRect.minX - mw),
+                           rawRect.width + 2 * mw),
+                height: min(CGFloat(cgImage.height) - max(0, rawRect.minY - mh),
+                            rawRect.height + 2 * mh)
             )
             guard let faceCrop = cgImage.cropping(to: expandedRect) else {
                 faceQualityIssues = [.noFaceFound]
@@ -207,7 +244,9 @@ final class EnrollmentViewModel: ObservableObject {
             // feature prints on a face crop is the documented workaround
             // and works well enough for "is this the same kid?" matching.
             let printReq = VNGenerateImageFeaturePrintRequest()
-            let printHandler = VNImageRequestHandler(cgImage: faceCrop, options: [:])
+            let printHandler = VNImageRequestHandler(cgImage: faceCrop,
+                                                     orientation: orientation,
+                                                     options: [:])
             try printHandler.perform([printReq])
             guard let observation = printReq.results?.first as? VNFeaturePrintObservation else {
                 faceQualityIssues = [.noFaceFound]
@@ -219,6 +258,59 @@ final class EnrollmentViewModel: ObservableObject {
         } catch {
             log.error("Face extraction failed: \(error.localizedDescription)")
             faceQualityIssues = [.noFaceFound]
+        }
+    }
+
+    /// Returns the image extent as Vision sees it after applying the source
+    /// orientation. For .right / .left orientations width and height swap.
+    private func orientedExtent(of cgImage: CGImage,
+                                orientation: CGImagePropertyOrientation)
+        -> (CGFloat, CGFloat) {
+        let w = CGFloat(cgImage.width), h = CGFloat(cgImage.height)
+        switch orientation {
+        case .right, .rightMirrored, .left, .leftMirrored:
+            return (h, w)
+        default:
+            return (w, h)
+        }
+    }
+
+    /// Maps a normalized Vision bounding box (origin bottom-left, in the
+    /// oriented space) back to raw cgImage pixel coordinates (origin
+    /// top-left). Only handles the orientations UIImagePickerController
+    /// actually returns for camera-captured stills.
+    private func boundingBoxInRawPixels(_ box: CGRect,
+                                        orientation: CGImagePropertyOrientation,
+                                        cgImage: CGImage) -> CGRect {
+        let rawW = CGFloat(cgImage.width)
+        let rawH = CGFloat(cgImage.height)
+        switch orientation {
+        case .up, .upMirrored:
+            return CGRect(x: box.minX * rawW,
+                          y: (1 - box.maxY) * rawH,
+                          width: box.width * rawW,
+                          height: box.height * rawH)
+        case .down, .downMirrored:
+            return CGRect(x: (1 - box.maxX) * rawW,
+                          y: box.minY * rawH,
+                          width: box.width * rawW,
+                          height: box.height * rawH)
+        case .right, .rightMirrored:
+            // Oriented (W,H) = (rawH, rawW). Box.x maps to rawY, box.y to rawX.
+            return CGRect(x: box.minY * rawW,
+                          y: box.minX * rawH,
+                          width: box.height * rawW,
+                          height: box.width * rawH)
+        case .left, .leftMirrored:
+            return CGRect(x: (1 - box.maxY) * rawW,
+                          y: (1 - box.maxX) * rawH,
+                          width: box.height * rawW,
+                          height: box.width * rawH)
+        @unknown default:
+            return CGRect(x: box.minX * rawW,
+                          y: (1 - box.maxY) * rawH,
+                          width: box.width * rawW,
+                          height: box.height * rawH)
         }
     }
 
