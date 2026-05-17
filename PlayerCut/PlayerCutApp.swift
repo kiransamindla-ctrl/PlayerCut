@@ -3,7 +3,7 @@
 //  PlayerCut
 //
 //  Top-level app entry. Wires GameStore, PipelineOrchestrator, and
-//  BackgroundProcessing on launch.
+//  BackgroundProcessingV2 on launch.
 //
 
 import SwiftUI
@@ -35,8 +35,7 @@ final class AppCoordinator: ObservableObject {
     @Published var players: [PlayerEnrollment] = []
 
     func bootstrap() async {
-        BackgroundProcessing.shared.register(orchestrator: orchestrator)
-        BackgroundProcessing.shared.loadPersistedQueue()
+        BackgroundProcessingV2.shared.register(orchestrator: orchestrator)
 
         let center = UNUserNotificationCenter.current()
         _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
@@ -52,7 +51,7 @@ final class AppCoordinator: ObservableObject {
     /// Called from the UI when the user taps "Stop game".
     func didFinishRecording(game: GameSession) async {
         try? await store.upsert(game)
-        BackgroundProcessing.shared.enqueueGame(game.id)
+        BackgroundProcessingV2.shared.enqueueGame(game.id)
         await refresh()
     }
 }

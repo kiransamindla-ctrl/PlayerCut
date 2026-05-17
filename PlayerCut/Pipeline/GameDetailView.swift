@@ -19,6 +19,8 @@ struct GameDetailView: View {
                                                     on: .main,
                                                     in: .common).autoconnect()
     @State private var presentingShare = false
+    @State private var manualRun: Task<Void, Never>?
+    @State private var manualRunLog: String?
 
     var body: some View {
         Group {
@@ -67,9 +69,64 @@ struct GameDetailView: View {
                 Text("Started \(game.startedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                // Debug-only: surface a manual trigger while BG task
+                // heuristics are still warming up on this device.
+                if game.status == .awaitingProcessing || game.status == .failed {
+                    Button {
+                        runNow(gameID: game.id)
+                    } label: {
+                        Label(manualRun == nil ? "Process Now" : "Processing…",
+                              systemImage: "play.circle")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(manualRun != nil)
+                    .padding(.horizontal)
+                }
+
+                if let manualRunLog {
+                    Text(manualRunLog)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal)
+                }
+
                 Spacer()
             }
             .padding()
+        }
+    }
+
+    private func runNow(gameID: UUID) {
+        guard manualRun == nil else { return }
+        manualRunLog = "Starting…"
+        manualRun = Task {
+            let stream = await coordinator.orchestrator.run(gameId: gameID,
+                                                            musicURL: nil)
+            for await progress in stream {
+                manualRunLog = describe(progress)
+                if case .completed = progress { break }
+                if case .failed = progress { break }
+            }
+            await coordinator.refresh()
+            manualRun = nil
+        }
+    }
+
+    private func describe(_ p: PipelineOrchestrator.Progress) -> String {
+        switch p {
+        case .stage1Started: return "Stage 1 started"
+        case .stage1Completed(let n): return "Stage 1 done — \(n) candidates"
+        case .stage2Started(let n): return "Stage 2 started over \(n) windows"
+        case .stage2Progress(let i, let n): return "Stage 2 \(i)/\(n)"
+        case .stage2Completed(let n): return "Stage 2 done — \(n) moments"
+        case .rankingCompleted(let n): return "Ranking done — \(n) clips"
+        case .composing: return "Composing reel"
+        case .completed: return "Done"
+        case .failed(let e): return "Failed: \(e.localizedDescription)"
         }
     }
 

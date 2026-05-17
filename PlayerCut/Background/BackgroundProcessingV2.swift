@@ -126,7 +126,11 @@ final class BackgroundProcessingV2 {
         // Try BG first, but kick off foreground runner if app is active.
         scheduleAllPendingTasks()
         if UIApplication.shared.applicationState == .active {
+            let wasIdle = (foregroundRunner == nil)
             startForegroundRunnerIfNeeded()
+            if wasIdle && foregroundRunner != nil {
+                log.info("Foreground runner started")
+            }
         }
     }
 

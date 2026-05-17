@@ -27,7 +27,6 @@
 		98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */; };
 		AAFAFC89E3DAF7A44493BBDB /* ReelComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */; };
 		AC884A0EE2C853B09CF99F29 /* Stage1CoarseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4ABAD3A6EB6390A240D3D85 /* Stage1CoarseDetector.swift */; };
-		B44DA133B9F50C367362F926 /* BackgroundProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E79567BEEA067967F5896DA5 /* BackgroundProcessing.swift */; };
 		BDB2E933B46DDE3FF5DC5B1F /* JerseyOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7F1E1FE1AD12D18BD49B744 /* JerseyOCR.swift */; };
 		C9884D22FDD42935BA622E96 /* EvaluationHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = B99F55F63E923EEF3B3AC8B4 /* EvaluationHarness.swift */; };
 		D22548D9D37ACB6C5E6F1323 /* EnrollmentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D749DFAEDD43402C90FC8DCD /* EnrollmentViewModel.swift */; };
@@ -73,7 +72,6 @@
 		D749DFAEDD43402C90FC8DCD /* EnrollmentViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentViewModel.swift; sourceTree = "<group>"; };
 		D7F1E1FE1AD12D18BD49B744 /* JerseyOCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JerseyOCR.swift; sourceTree = "<group>"; };
 		DE476586888DDD7EBAF974F7 /* HighlightRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightRanker.swift; sourceTree = "<group>"; };
-		E79567BEEA067967F5896DA5 /* BackgroundProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundProcessing.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -225,7 +223,6 @@
 		F05963A10D1D7E6E66EC658B /* Background */ = {
 			isa = PBXGroup;
 			children = (
-				E79567BEEA067967F5896DA5 /* BackgroundProcessing.swift */,
 				6A1075CB059A40D14F1DB938 /* BackgroundProcessingV2.swift */,
 			);
 			path = Background;
@@ -318,7 +315,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B44DA133B9F50C367362F926 /* BackgroundProcessing.swift in Sources */,
 				77293FA0F97806539B9CD4ED /* BackgroundProcessingV2.swift in Sources */,
 				95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */,
 				47564E71FFC18A092E06FD93 /* CoreModels.swift in Sources */,
