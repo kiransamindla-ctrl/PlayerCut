@@ -94,7 +94,19 @@ actor Stage2PlayerLocalizer {
         let frameInterval = 1.0 / analysisFPS
         var lastEmitted: Double = -.infinity
 
-        var bestPlayerScores: [Float] = []
+        // Window-level OCR voting: we collect every per-person OCR result
+        // across the entire window, then aggregate at the end. This is the
+        // single biggest accuracy win versus per-frame scoring — a stray
+        // "23" from the crowd background can't outvote a player who
+        // appears in 10+ frames.
+        let ocr = JerseyOCR()
+        var ocrFrameResults: [JerseyOCR.FrameResult] = []
+
+        // Per-frame color/face for the "best person in this frame".
+        // Number score is intentionally NOT part of the per-frame pick —
+        // jersey-number evidence is aggregated at the window level below.
+        var bestColorScores: [Float] = []
+        var bestFaceScores: [Float] = []
         var jointVelocities: [Float] = []
         var playerBoxes: [TimedBox] = []
         var lastBoxCenter: CGPoint?
@@ -103,7 +115,6 @@ actor Stage2PlayerLocalizer {
             if frame.time - lastEmitted < frameInterval { continue }
             lastEmitted = frame.time
 
-            // 1. Detect humans via the shared VisionPipeline actor.
             let people: [VNHumanObservation]
             do {
                 people = try await vision.detectHumans(in: frame.buffer)
@@ -112,26 +123,50 @@ actor Stage2PlayerLocalizer {
             }
             guard !people.isEmpty else { continue }
 
-            // Only realize a CGImage when we have humans to score —
-            // skips the convert cost on empty frames.
             guard let cgImage = cgImage(from: frame.buffer) else { continue }
 
-            // 2. Score each detected person against enrollment.
-            var bestScore: Float = 0
+            var bestCF: Float = 0
+            var bestColor: Float = 0
+            var bestFace: Float = 0
             var bestBox: CGRect?
 
             for person in people {
-                let score = try await scoreCandidate(person: person,
-                                                     in: cgImage,
-                                                     enrollment: enrollment)
-                if score > bestScore {
-                    bestScore = score
+                guard let personCrop = cropPerson(person, in: cgImage) else {
+                    continue
+                }
+
+                // OCR every person crop and append to the window-level vote.
+                let frameResult = await ocr.recognize(
+                    in: personCrop,
+                    targetNumber: enrollment.jerseyNumber)
+                ocrFrameResults.append(frameResult)
+
+                let torsoCrop = upperTorso(of: personCrop)
+                let color: Float
+                if let torso = torsoCrop {
+                    color = scoreJerseyColor(in: torso,
+                                             target: enrollment.jerseyColorHSV)
+                } else {
+                    color = 0
+                }
+                let face = await scoreFace(in: personCrop,
+                                           target: enrollment.faceEmbedding)
+
+                let cf = combinedColorFace(color: color, face: face)
+                if cf > bestCF {
+                    bestCF = cf
+                    bestColor = color
+                    bestFace = face
                     bestBox = person.boundingBox
                 }
             }
 
-            if bestScore >= identificationThreshold, let box = bestBox {
-                bestPlayerScores.append(bestScore)
+            // Use the per-frame color/face score (no number) for the
+            // sighting gate. Threshold mirrors identificationThreshold so
+            // we don't blow up false positives.
+            if bestCF >= identificationThreshold, let box = bestBox {
+                bestColorScores.append(bestColor)
+                bestFaceScores.append(bestFace)
                 playerBoxes.append(TimedBox(time: frame.time, box: box))
 
                 let center = CGPoint(x: box.midX, y: box.midY)
@@ -144,11 +179,46 @@ actor Stage2PlayerLocalizer {
             }
         }
 
-        // Need at least 3 confirmed sightings to count
-        guard bestPlayerScores.count >= 3 else { return nil }
+        // Need at least 3 confirmed sightings to count.
+        guard bestColorScores.count >= 3 else { return nil }
 
-        let identificationConfidence = bestPlayerScores.reduce(0, +)
-            / Float(bestPlayerScores.count)
+        // Window-level number score via temporal voting.
+        let ocrWindowResult = await ocr.aggregate(
+            frameResults: ocrFrameResults,
+            targetNumber: enrollment.jerseyNumber)
+        let numberScore = ocrWindowResult.matchConfidence
+
+        let meanColor = bestColorScores.reduce(0, +) / Float(bestColorScores.count)
+        let meanFace = bestFaceScores.reduce(0, +) / Float(bestFaceScores.count)
+
+        // Adaptive weights:
+        //   ≥3 frames of OCR evidence → trust the number (N 0.5, C 0.3, F 0.2)
+        //   <3 frames → drop N to 0.2 and lean on color (0.5) + face (0.3),
+        //   matching the integration spec's redistribution rule.
+        let nW: Float, cW: Float, fW: Float
+        if ocrWindowResult.frameCount >= 3 {
+            nW = IdentificationWeights.jerseyNumber       // 0.5
+            cW = IdentificationWeights.jerseyColor        // 0.3
+            fW = IdentificationWeights.face               // 0.2
+        } else {
+            nW = 0.2
+            cW = 0.5
+            fW = 0.3
+        }
+
+        let identificationConfidence: Float
+        if meanFace == 0 {
+            // No face evidence — redistribute face weight to N and C
+            // proportionally to their existing share.
+            let total = nW + cW
+            identificationConfidence = (nW / total) * numberScore
+                                     + (cW / total) * meanColor
+        } else {
+            identificationConfidence = nW * numberScore
+                                     + cW * meanColor
+                                     + fW * meanFace
+        }
+
         let activityScore = clamp(jointVelocities.reduce(0, +) * 5.0, 0, 1)
 
         // Composite score — see "Ranking" section in spec
@@ -167,11 +237,8 @@ actor Stage2PlayerLocalizer {
 
     // MARK: - Identification scoring
 
-    private func scoreCandidate(person: VNHumanObservation,
-                                in image: CGImage,
-                                enrollment: PlayerEnrollment) async throws -> Float {
-
-        // Crop to person's bounding box (Vision uses bottom-left origin, normalized)
+    private func cropPerson(_ person: VNHumanObservation,
+                            in image: CGImage) -> CGImage? {
         let imgW = CGFloat(image.width)
         let imgH = CGFloat(image.height)
         let bbox = person.boundingBox
@@ -179,74 +246,29 @@ actor Stage2PlayerLocalizer {
                           y: (1 - bbox.origin.y - bbox.height) * imgH,
                           width: bbox.width * imgW,
                           height: bbox.height * imgH)
-        guard let personCrop = image.cropping(to: rect) else { return 0 }
+        return image.cropping(to: rect)
+    }
 
-        // Torso = upper-middle band of the bounding box
+    private func upperTorso(of personCrop: CGImage) -> CGImage? {
         let torsoY = personCrop.height / 4
         let torsoH = personCrop.height / 2
         let torsoRect = CGRect(x: 0, y: torsoY,
                                width: personCrop.width, height: torsoH)
-        let torsoCrop = personCrop.cropping(to: torsoRect)
-
-        // Run sub-scores in parallel where possible
-        async let numberScore: Float = {
-            guard let torso = torsoCrop else { return 0 }
-            return await self.scoreJerseyNumber(in: torso,
-                                                target: enrollment.jerseyNumber)
-        }()
-
-        async let colorScore: Float = {
-            guard let torso = torsoCrop else { return 0 }
-            return await self.scoreJerseyColor(in: torso,
-                                               target: enrollment.jerseyColorHSV)
-        }()
-
-        async let faceScore: Float = scoreFace(in: personCrop,
-                                               target: enrollment.faceEmbedding)
-
-        let n = await numberScore
-        let c = await colorScore
-        let f = await faceScore
-
-        // Face is unreliable at distance; if we couldn't extract one (f == 0),
-        // redistribute its weight proportionally to number and color.
-        if f == 0 {
-            let nWeight = IdentificationWeights.jerseyNumber
-                / (IdentificationWeights.jerseyNumber + IdentificationWeights.jerseyColor)
-            let cWeight = IdentificationWeights.jerseyColor
-                / (IdentificationWeights.jerseyNumber + IdentificationWeights.jerseyColor)
-            return n * nWeight + c * cWeight
-        }
-        return n * IdentificationWeights.jerseyNumber
-             + c * IdentificationWeights.jerseyColor
-             + f * IdentificationWeights.face
+        return personCrop.cropping(to: torsoRect)
     }
 
-    // Jersey number via VisionPipeline's reused text request + fuzzy match.
-    private func scoreJerseyNumber(in torso: CGImage, target: String) async -> Float {
-        let observations: [VNRecognizedTextObservation]
-        do {
-            observations = try await vision.recognizeText(in: torso)
-        } catch {
-            return 0
-        }
-        var bestScore: Float = 0
-        for obs in observations {
-            guard let candidate = obs.topCandidates(1).first else { continue }
-            let cleaned = candidate.string.filter { $0.isNumber || $0 == "0" }
-            if cleaned.isEmpty { continue }
-            let distance = levenshtein(cleaned, target)
-            // Distance 0 → 1.0; distance 1 → 0.6; distance 2 → 0.2; further → 0
-            let score: Float
-            switch distance {
-            case 0: score = 1.0
-            case 1: score = 0.6
-            case 2: score = 0.2
-            default: score = 0
-            }
-            bestScore = max(bestScore, score)
-        }
-        return bestScore
+    /// Per-frame attribution score combining color and face only. Used to
+    /// pick the best person in the frame; the jersey number contributes at
+    /// the window level via JerseyOCR.aggregate.
+    private func combinedColorFace(color: Float, face: Float) -> Float {
+        // Renormalize C/F weights from IdentificationWeights so they sum
+        // to 1 in the absence of number: color 0.6, face 0.4 by default,
+        // collapse to color-only when no face was detected.
+        if face == 0 { return color }
+        let cf = IdentificationWeights.jerseyColor + IdentificationWeights.face
+        let cW = IdentificationWeights.jerseyColor / cf
+        let fW = IdentificationWeights.face / cf
+        return color * cW + face * fW
     }
 
     private func scoreJerseyColor(in torso: CGImage,
