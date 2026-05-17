@@ -1,0 +1,64 @@
+name: PlayerCut
+options:
+  bundleIdPrefix: com.playercut
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    SWIFT_STRICT_CONCURRENCY: minimal
+
+targets:
+  PlayerCut:
+    type: application
+    platform: iOS
+    sources:
+      - path: PlayerCut
+        excludes:
+          - "Vision/Stage2-JerseyOCR-Integration.swift"
+          - "Diagnostics/Diagnostics-Wireup.swift"
+          - "**/*.md"
+    info:
+      path: PlayerCut/Info.plist
+      properties:
+        CFBundleDisplayName: PlayerCut
+        NSCameraUsageDescription: Record your child's game.
+        NSMicrophoneUsageDescription: Detect crowd reactions for highlight detection.
+        NSPhotoLibraryAddUsageDescription: Save your highlight reels.
+        UIBackgroundModes:
+          - processing
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.playercut.app.process-game
+          - com.playercut.app.refresh
+        UILaunchScreen:
+          UIColorName: ""
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.playercut.app
+        TARGETED_DEVICE_FAMILY: "1"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+    entitlements:
+      path: PlayerCut/PlayerCut.entitlements
+      properties: {}
+    dependencies: []
+
+  PlayerCutTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: PlayerCutTests
+    dependencies:
+      - target: PlayerCut
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.playercut.app.tests
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/PlayerCut.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PlayerCut
+        BUNDLE_LOADER: $(TEST_HOST)
