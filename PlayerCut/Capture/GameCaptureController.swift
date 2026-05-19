@@ -111,7 +111,9 @@ final class GameCaptureController: NSObject {
 
     // MARK: - Lifecycle
 
-    func startRecording(for player: PlayerEnrollment, sport: Sport) throws -> GameSession {
+    func startRecording(for player: PlayerEnrollment,
+                        sport: Sport,
+                        triggerSource: TriggerSource = .manual) throws -> GameSession {
         let id = UUID()
         let dir = StoragePaths.gameDirectory(for: id)
         try FileManager.default.createDirectory(at: dir,
@@ -138,9 +140,10 @@ final class GameCaptureController: NSObject {
                                stage1Result: nil,
                                stage2Result: nil,
                                exportedReelURL: nil,
-                               status: .recording)
+                               status: .recording,
+                               triggerSource: triggerSource)
         currentSession = game
-        log.info("Recording started: \(id.uuidString)")
+        log.info("Recording started: \(id.uuidString) trigger=\(triggerSource.rawValue)")
         return game
     }
 

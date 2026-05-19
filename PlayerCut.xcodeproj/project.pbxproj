@@ -15,6 +15,7 @@
 		2BEDCCAC18BE9C3410B7C192 /* DiagnosticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CD75C3C4488657399E44F3 /* DiagnosticsStore.swift */; };
 		47564E71FFC18A092E06FD93 /* CoreModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D587C2A30C175BFF9F8DAA6E /* CoreModels.swift */; };
 		535FDD39ADCF51F41CB3CBE3 /* FrameIterator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C213546B194076C52C3DF88 /* FrameIterator.swift */; };
+		590C2FD54A568CE9A0F3CD5D /* MountDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E5B7E9DE36AFADB13EEA06 /* MountDetector.swift */; };
 		5DD394B2B03929DF767E40CB /* StringDistance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F7851FE3324E34A43A322CD /* StringDistance.swift */; };
 		5EB45B86F5AF7896651CC407 /* LabeledCorpus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 852AFF8530482F6F7EA13F0F /* LabeledCorpus.swift */; };
 		64C548F37D75D1160461F9EC /* HighlightRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE476586888DDD7EBAF974F7 /* HighlightRanker.swift */; };
@@ -44,6 +45,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		15E5B7E9DE36AFADB13EEA06 /* MountDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountDetector.swift; sourceTree = "<group>"; };
 		26C24C5163D5195F4DEDE1C1 /* PixelBufferPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelBufferPool.swift; sourceTree = "<group>"; };
 		2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelComposer.swift; sourceTree = "<group>"; };
 		3005B7F01FC9B5D7223D127F /* PlayerCut.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PlayerCut.entitlements; sourceTree = "<group>"; };
@@ -208,6 +210,7 @@
 			children = (
 				B24D4CA15A14D5F147D77A85 /* CaptureView.swift */,
 				6EFEA6919A4C1A6B3FA4E4E0 /* GameCaptureController.swift */,
+				15E5B7E9DE36AFADB13EEA06 /* MountDetector.swift */,
 			);
 			path = Capture;
 			sourceTree = "<group>";
@@ -329,6 +332,7 @@
 				64C548F37D75D1160461F9EC /* HighlightRanker.swift in Sources */,
 				BDB2E933B46DDE3FF5DC5B1F /* JerseyOCR.swift in Sources */,
 				5EB45B86F5AF7896651CC407 /* LabeledCorpus.swift in Sources */,
+				590C2FD54A568CE9A0F3CD5D /* MountDetector.swift in Sources */,
 				044E3F26F254BBF88FC025F0 /* PipelineOrchestrator.swift in Sources */,
 				1C48996C7F483E9693707056 /* PixelBufferPool.swift in Sources */,
 				98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */,

@@ -53,6 +53,14 @@ struct HSVHistogram: Codable {
 
 // MARK: - Game session
 
+/// What kicked off the recording. Used for diagnostics and (later) for
+/// surfacing why a game was captured when reviewing the library.
+enum TriggerSource: String, Codable {
+    case manual
+    case mountDetected
+    case calendarPreSchedule
+}
+
 /// Top-level record for one recorded game.
 struct GameSession: Codable, Identifiable {
     let id: UUID
@@ -66,6 +74,51 @@ struct GameSession: Codable, Identifiable {
     var stage2Result: Stage2Result?
     var exportedReelURL: URL?
     var status: GameStatus = .recording
+    var triggerSource: TriggerSource = .manual
+
+    init(id: UUID,
+         playerId: UUID,
+         sport: Sport,
+         startedAt: Date,
+         endedAt: Date?,
+         rawVideoURL: URL,
+         audioLoudnessURL: URL,
+         stage1Result: Stage1Result?,
+         stage2Result: Stage2Result?,
+         exportedReelURL: URL?,
+         status: GameStatus = .recording,
+         triggerSource: TriggerSource = .manual) {
+        self.id = id
+        self.playerId = playerId
+        self.sport = sport
+        self.startedAt = startedAt
+        self.endedAt = endedAt
+        self.rawVideoURL = rawVideoURL
+        self.audioLoudnessURL = audioLoudnessURL
+        self.stage1Result = stage1Result
+        self.stage2Result = stage2Result
+        self.exportedReelURL = exportedReelURL
+        self.status = status
+        self.triggerSource = triggerSource
+    }
+
+    // Custom decode so games persisted before triggerSource existed
+    // still round-trip — they fall back to .manual.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        playerId = try c.decode(UUID.self, forKey: .playerId)
+        sport = try c.decode(Sport.self, forKey: .sport)
+        startedAt = try c.decode(Date.self, forKey: .startedAt)
+        endedAt = try c.decodeIfPresent(Date.self, forKey: .endedAt)
+        rawVideoURL = try c.decode(URL.self, forKey: .rawVideoURL)
+        audioLoudnessURL = try c.decode(URL.self, forKey: .audioLoudnessURL)
+        stage1Result = try c.decodeIfPresent(Stage1Result.self, forKey: .stage1Result)
+        stage2Result = try c.decodeIfPresent(Stage2Result.self, forKey: .stage2Result)
+        exportedReelURL = try c.decodeIfPresent(URL.self, forKey: .exportedReelURL)
+        status = try c.decodeIfPresent(GameStatus.self, forKey: .status) ?? .recording
+        triggerSource = try c.decodeIfPresent(TriggerSource.self, forKey: .triggerSource) ?? .manual
+    }
 }
 
 enum GameStatus: String, Codable {

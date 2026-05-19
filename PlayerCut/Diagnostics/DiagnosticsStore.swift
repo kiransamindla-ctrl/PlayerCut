@@ -212,6 +212,10 @@ enum CounterKey: String {
     case stage2NoIdentification = "stage2_no_identification"
     case stage2HighConfidenceIdentification = "stage2_high_conf_identification"
 
+    // Mount-detection auto-start
+    case autoStartTriggered = "auto_start_triggered"
+    case autoStartFalsePositive = "auto_start_false_positive"
+
     // Errors (categorized, never with text)
     case errorCaptureFailed = "err_capture_failed"
     case errorPipelineFailed = "err_pipeline_failed"
