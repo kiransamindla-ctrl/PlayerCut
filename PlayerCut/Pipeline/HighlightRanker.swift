@@ -72,6 +72,26 @@ final class HighlightRanker {
             return ReelPlan(selected: [], totalDuration: 0)
         }
 
+        // If we have fewer moments than minClips can fit, keep all of them
+        // and skip the diversity / target-duration constraints — the user
+        // is doing a short or solo-practice recording and a short reel is
+        // better than no reel.
+        if moments.count < config.minClips {
+            log.info("Ranker short-clip path: \(moments.count) moments < minClips=\(self.config.minClips), using all")
+            let clips = moments
+                .sorted { $0.window.startTime < $1.window.startTime }
+                .map { moment -> SelectedClip in
+                    let length = self.clipLength(for: moment)
+                    let center = (moment.window.startTime + moment.window.endTime) / 2
+                    let start = max(0, center - length / 2)
+                    return SelectedClip(moment: moment,
+                                        clipStart: start,
+                                        clipEnd: start + length)
+                }
+            let total = clips.reduce(0.0) { $0 + $1.duration }
+            return ReelPlan(selected: clips, totalDuration: total)
+        }
+
         // Sort by composite score, descending
         let sorted = moments.sorted { $0.compositeScore > $1.compositeScore }
         var selected: [SelectedClip] = []

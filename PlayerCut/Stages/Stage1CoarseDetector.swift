@@ -46,28 +46,75 @@ actor Stage1CoarseDetector {
         let startedAt = Date()
         log.info("Stage 1 detect: starting")
 
-        async let audio = detectAudioPeaks(loudnessURL: game.audioLoudnessURL)
-        async let motion = detectMotionPeaks(videoURL: game.rawVideoURL)
+        // Duration-aware minimum: one candidate per 30 s of source, but
+        // never less than 1. A 60-second solo-practice clip should still
+        // produce something usable, even if there's only one "moment".
+        let videoDurationSeconds = try await videoDuration(at: game.rawVideoURL)
+        let minCandidates = max(1, Int(videoDurationSeconds / 30))
+        log.info("Stage 1: duration=\(videoDurationSeconds, format: .fixed(precision: 1))s → minCandidates=\(minCandidates)")
 
-        let audioWindows = try await audio
-        log.info("Stage 1 detect: audio done (\(audioWindows.count) windows)")
-        let motionWindows = try await motion
-        log.info("Stage 1: \(audioWindows.count) audio + \(motionWindows.count) motion windows")
+        var (audioWindows, motionWindows) = try await runDetectors(
+            loudnessURL: game.audioLoudnessURL,
+            videoURL: game.rawVideoURL,
+            audioSigma: audioSigmaThreshold,
+            flowSigma: flowSigmaThreshold)
 
-        let merged = mergeAndDedupe(audio: audioWindows, motion: motionWindows)
-        let trimmed = Array(merged.prefix(maxCandidates))
+        var merged = mergeAndDedupe(audio: audioWindows, motion: motionWindows)
+        var trimmed = Array(merged.prefix(maxCandidates))
 
-        if trimmed.count < 12 {
-            throw PipelineError.insufficientCandidates(found: trimmed.count, needed: 12)
+        // Soft fallback: if first pass didn't clear the duration-aware
+        // floor, lower σ by 0.5 and try once more. Catches quiet/low-
+        // motion clips (solo practice, indoor drills) without losing the
+        // production thresholds in normal use.
+        if trimmed.count < minCandidates {
+            log.info("Stage 1 fallback: \(trimmed.count) < \(minCandidates), retrying with σ-0.5")
+            let (a2, m2) = try await runDetectors(
+                loudnessURL: game.audioLoudnessURL,
+                videoURL: game.rawVideoURL,
+                audioSigma: max(0.5, audioSigmaThreshold - 0.5),
+                flowSigma: max(0.5, flowSigmaThreshold - 0.5))
+            audioWindows = a2
+            motionWindows = m2
+            merged = mergeAndDedupe(audio: a2, motion: m2)
+            trimmed = Array(merged.prefix(maxCandidates))
+            log.info("Stage 1 fallback: produced \(trimmed.count) candidates")
         }
 
+        // Only truly empty videos fail. Anything ≥1 candidate is honored;
+        // downstream (HighlightRanker) handles short clip lists gracefully.
+        if trimmed.isEmpty {
+            log.warning("Stage 1: no candidates after retry — video appears empty")
+            throw PipelineError.insufficientCandidates(found: 0, needed: 1)
+        }
+
+        log.info("Stage 1 done: \(trimmed.count) candidates (audio=\(audioWindows.count), motion=\(motionWindows.count))")
         return Stage1Result(candidates: trimmed,
                             processingDuration: Date().timeIntervalSince(startedAt))
     }
 
+    private func videoDuration(at url: URL) async throws -> Double {
+        let asset = AVURLAsset(url: url)
+        return try await asset.load(.duration).seconds
+    }
+
+    private func runDetectors(loudnessURL: URL,
+                              videoURL: URL,
+                              audioSigma: Float,
+                              flowSigma: Float) async throws
+        -> ([CandidateWindow], [CandidateWindow]) {
+        async let audio = detectAudioPeaks(loudnessURL: loudnessURL,
+                                           sigma: audioSigma)
+        async let motion = detectMotionPeaks(videoURL: videoURL,
+                                             sigma: flowSigma)
+        let a = try await audio
+        let m = try await motion
+        return (a, m)
+    }
+
     // MARK: - Audio
 
-    private func detectAudioPeaks(loudnessURL: URL) async throws -> [CandidateWindow] {
+    private func detectAudioPeaks(loudnessURL: URL,
+                                  sigma: Float) async throws -> [CandidateWindow] {
         log.info("Stage 1 audio: reading loudness file")
         let data = try Data(contentsOf: loudnessURL)
         let samples = try JSONDecoder().decode([GameCaptureController.LoudnessSample].self,
@@ -93,7 +140,7 @@ actor Stage1CoarseDetector {
             let variance = window.map { ($0 - mean) * ($0 - mean) }
                 .reduce(0, +) / Float(window.count)
             let stdev = sqrt(variance)
-            if s.rms > mean + audioSigmaThreshold * stdev {
+            if s.rms > mean + sigma * stdev {
                 aboveThreshold.append((s.t, s.rms))
             }
         }
@@ -135,7 +182,8 @@ actor Stage1CoarseDetector {
 
     // MARK: - Optical flow on a 320x180 proxy
 
-    private func detectMotionPeaks(videoURL: URL) async throws -> [CandidateWindow] {
+    private func detectMotionPeaks(videoURL: URL,
+                                   sigma: Float) async throws -> [CandidateWindow] {
         log.info("Stage 1 motion: loading asset")
         let asset = AVURLAsset(url: videoURL)
         let duration = try await asset.load(.duration).seconds
@@ -176,7 +224,7 @@ actor Stage1CoarseDetector {
         await iterator.cancel()
         log.info("Stage 1 flow: \(magnitudes.count) frames analyzed (decoded \(decoded) total)")
 
-        return findFlowPeaks(magnitudes)
+        return findFlowPeaks(magnitudes, sigma: sigma)
     }
 
     private func copyToPool(_ source: CVPixelBuffer) -> CVPixelBuffer? {
@@ -239,9 +287,22 @@ actor Stage1CoarseDetector {
         return count > 0 ? sum / Double(count) : 0
     }
 
-    private func findFlowPeaks(_ magnitudes: [(time: Double, mag: Float)])
-        -> [CandidateWindow] {
-        guard magnitudes.count > 10 else { return [] }
+    private func findFlowPeaks(_ magnitudes: [(time: Double, mag: Float)],
+                               sigma: Float) -> [CandidateWindow] {
+        // For very short clips (≤10 samples = ≤5 s at 2 fps), fall back
+        // to a single peak at the highest-magnitude frame so we don't
+        // return empty when the user does a quick test recording.
+        guard magnitudes.count > 10 else {
+            if let best = magnitudes.max(by: { $0.mag < $1.mag }) {
+                log.info("Stage 1 flow: short-clip fallback, single peak at t=\(best.time, format: .fixed(precision: 1))s")
+                return [CandidateWindow(id: UUID(),
+                                        startTime: max(0, best.time - 4),
+                                        endTime: best.time + 4,
+                                        audioScore: 0.0,
+                                        motionScore: 1.0)]
+            }
+            return []
+        }
 
         // Rolling baseline (10s window at 2fps = 20 samples)
         let windowSize = 20
@@ -255,7 +316,7 @@ actor Stage1CoarseDetector {
             let variance = window.map { ($0 - mean) * ($0 - mean) }
                 .reduce(0, +) / Float(window.count)
             let stdev = sqrt(variance)
-            if entry.mag > mean + flowSigmaThreshold * stdev {
+            if entry.mag > mean + sigma * stdev {
                 peaks.append(entry.time)
             }
         }

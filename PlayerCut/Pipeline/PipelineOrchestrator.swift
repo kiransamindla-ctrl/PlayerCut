@@ -115,9 +115,16 @@ actor PipelineOrchestrator {
                         seconds: Date().timeIntervalSince(rankingStart))
                     continuation.yield(.rankingCompleted(clipCount: plan.selected.count))
 
-                    if plan.selected.count < 4 {
+                    // Short/solo-practice support: a single-clip reel is
+                    // a valid output. Only refuse if the ranker produced
+                    // literally nothing.
+                    if plan.selected.isEmpty {
                         throw PipelineError.insufficientCandidates(
-                            found: plan.selected.count, needed: 4)
+                            found: 0, needed: 1)
+                    }
+                    if plan.totalDuration < length.targetSeconds * 0.5 {
+                        await DiagnosticsStore.shared.increment(.shortReelProduced)
+                        self.log.info("Short reel: \(plan.totalDuration, format: .fixed(precision: 1))s vs target \(length.targetSeconds, format: .fixed(precision: 0))s")
                     }
 
                     // Compose

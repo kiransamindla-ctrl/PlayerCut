@@ -221,6 +221,9 @@ enum CounterKey: String {
     case reelSavedToPhotos = "reel_saved_to_photos"
     case photoLibraryPermissionDenied = "photo_library_permission_denied"
 
+    // Short / solo-practice recordings
+    case shortReelProduced = "short_reel_produced"
+
     // Errors (categorized, never with text)
     case errorCaptureFailed = "err_capture_failed"
     case errorPipelineFailed = "err_pipeline_failed"
