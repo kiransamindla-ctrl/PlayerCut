@@ -216,6 +216,24 @@ final class HighlightRankerTests: XCTestCase {
                        "Exceptional clip should be near 8s (allowing for window-edge clamping)")
     }
 
+    /// Low-event sport (skill clinic, defensive game with no scoring):
+    /// all moments below the exceptional threshold, well-separated, count
+    /// under the default minClips. Ranker should return all of them as a
+    /// short reel rather than producing zero.
+    func testLowActivityNoExceptionalMomentsReturnAllClips() {
+        let moments: [ScoredMoment] = (0..<8).enumerated().map { (i, _) in
+            makeMoment(center: 60 + Double(i) * 60,
+                       composite: 0.3 + Float(i) * 0.025)  // 0.300 … 0.475
+        }
+        let plan = HighlightRanker().selectClips(from: moments)
+        XCTAssertEqual(plan.selected.count, 8,
+                       "All low-activity moments should appear in the reel")
+        XCTAssertGreaterThan(plan.totalDuration, 0)
+        let starts = plan.selected.map { $0.clipStart }
+        XCTAssertEqual(starts, starts.sorted(),
+                       "Short-clip path must still order chronologically")
+    }
+
     func testNormalScoreClipsRespectMaxClipDuration() {
         // All moments below the exceptional threshold; clip lengths must
         // stay ≤ maxClipDuration (modulo small floating-point slop).
