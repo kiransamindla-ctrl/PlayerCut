@@ -56,6 +56,35 @@ struct PlayerEnrollment: Codable, Identifiable {
     }
 }
 
+/// Target length for an end-of-season compilation stitched from
+/// multiple games. Distinct from `ReelLength` because compilations
+/// don't offer 60 s (too short to give every game a fair window) and
+/// they extend up to 10 min.
+enum CompilationLength: String, CaseIterable, Codable {
+    case twoMinutes   = "2min"
+    case threeMinutes = "3min"
+    case fiveMinutes  = "5min"
+    case tenMinutes   = "10min"
+
+    var targetSeconds: Double {
+        switch self {
+        case .twoMinutes:   return 120
+        case .threeMinutes: return 180
+        case .fiveMinutes:  return 300
+        case .tenMinutes:   return 600
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .twoMinutes:   return "2 min"
+        case .threeMinutes: return "3 min"
+        case .fiveMinutes:  return "5 min"
+        case .tenMinutes:   return "10 min"
+        }
+    }
+}
+
 /// User-selectable target length of the final highlight reel.
 enum ReelLength: String, CaseIterable, Codable {
     case sixtySeconds = "60s"

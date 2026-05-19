@@ -63,6 +63,7 @@ struct RootView: View {
     @State private var presentingEnrollment = false
     @State private var presentingCapture = false
     @State private var presentingSettings = false
+    @State private var presentingCompilation = false
 
     var body: some View {
         NavigationStack {
@@ -104,6 +105,12 @@ struct RootView: View {
             }
             .sheet(isPresented: $presentingSettings) {
                 SettingsView()
+            }
+            .sheet(isPresented: $presentingCompilation) {
+                if let player = coordinator.players.first {
+                    CompilationView(player: player)
+                        .environmentObject(coordinator)
+                }
             }
             .fullScreenCover(isPresented: $presentingCapture) {
                 if let player = coordinator.players.first {
@@ -157,6 +164,13 @@ struct RootView: View {
             }
 
             Section("Games") {
+                Button {
+                    presentingCompilation = true
+                } label: {
+                    Label("Combine games into compilation",
+                          systemImage: "rectangle.stack.badge.play")
+                }
+                .disabled(eligibleCompilationGames.count < 2)
                 if coordinator.games.isEmpty {
                     Text("No games yet — tap Record to start.")
                         .foregroundStyle(.secondary)
@@ -177,6 +191,14 @@ struct RootView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var eligibleCompilationGames: [GameSession] {
+        coordinator.games.filter { g in
+            g.status == .completed
+                && (g.exportedReelAssetId != nil
+                    || g.localReelFallbackURL != nil)
         }
     }
 }

@@ -14,6 +14,7 @@
 		2BECEA58E472B80596F89F87 /* GameCaptureController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EFEA6919A4C1A6B3FA4E4E0 /* GameCaptureController.swift */; };
 		2BEDCCAC18BE9C3410B7C192 /* DiagnosticsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CD75C3C4488657399E44F3 /* DiagnosticsStore.swift */; };
 		47564E71FFC18A092E06FD93 /* CoreModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D587C2A30C175BFF9F8DAA6E /* CoreModels.swift */; };
+		4E829B668CF908CA7303BCF1 /* CompilationOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0249D250B6BECDF107250978 /* CompilationOrchestrator.swift */; };
 		535FDD39ADCF51F41CB3CBE3 /* FrameIterator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C213546B194076C52C3DF88 /* FrameIterator.swift */; };
 		590C2FD54A568CE9A0F3CD5D /* MountDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15E5B7E9DE36AFADB13EEA06 /* MountDetector.swift */; };
 		5DD394B2B03929DF767E40CB /* StringDistance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F7851FE3324E34A43A322CD /* StringDistance.swift */; };
@@ -22,6 +23,7 @@
 		77293FA0F97806539B9CD4ED /* BackgroundProcessingV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A1075CB059A40D14F1DB938 /* BackgroundProcessingV2.swift */; };
 		77AC3FA3FD3BFEE9753A8DBE /* VisionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCC38D5C5EAD3E535D6E04E /* VisionPipeline.swift */; };
 		7963F03D10881DD2110E0650 /* PhotosLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4308B6B004B4F6FD5EA08C6 /* PhotosLibraryService.swift */; };
+		7C08D25A7F609A69A3D0A049 /* CompilationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45E3F1F197EF90A4AEF8B775 /* CompilationView.swift */; };
 		812C3853AFDB715B9AD1938E /* EnrollmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 608D09E55BF686A8910AF245 /* EnrollmentViews.swift */; };
 		85DCFCCA63858A8469FDE82E /* PlayerCutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0F8A80B4A9C591C60B82B5 /* PlayerCutTests.swift */; };
 		95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24D4CA15A14D5F147D77A85 /* CaptureView.swift */; };
@@ -47,6 +49,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0249D250B6BECDF107250978 /* CompilationOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompilationOrchestrator.swift; sourceTree = "<group>"; };
 		15E5B7E9DE36AFADB13EEA06 /* MountDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountDetector.swift; sourceTree = "<group>"; };
 		187D5FFFEF59F0D468549019 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		26C24C5163D5195F4DEDE1C1 /* PixelBufferPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelBufferPool.swift; sourceTree = "<group>"; };
@@ -54,6 +57,7 @@
 		3005B7F01FC9B5D7223D127F /* PlayerCut.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PlayerCut.entitlements; sourceTree = "<group>"; };
 		36946E4469D60B7F569114E3 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
 		3F7851FE3324E34A43A322CD /* StringDistance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringDistance.swift; sourceTree = "<group>"; };
+		45E3F1F197EF90A4AEF8B775 /* CompilationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompilationView.swift; sourceTree = "<group>"; };
 		4860CE2164ADF75EB19A533A /* Stage2PlayerLocalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stage2PlayerLocalizer.swift; sourceTree = "<group>"; };
 		608D09E55BF686A8910AF245 /* EnrollmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentViews.swift; sourceTree = "<group>"; };
 		66D00ECD5C55F39FB0B691F9 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
@@ -177,6 +181,7 @@
 				8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */,
 				F05963A10D1D7E6E66EC658B /* Background */,
 				D54D50EF72370D4492360F1B /* Capture */,
+				DB0B11D186D837E57F5F1240 /* Compilation */,
 				2CBB61FEF264F3A88FC5DB10 /* Composition */,
 				4CBD180A6149A48BE59928AB /* Diagnostics */,
 				A84EBBAD7368FDA87168447B /* Enrollment */,
@@ -235,6 +240,15 @@
 				D7F1E1FE1AD12D18BD49B744 /* JerseyOCR.swift */,
 			);
 			path = Vision;
+			sourceTree = "<group>";
+		};
+		DB0B11D186D837E57F5F1240 /* Compilation */ = {
+			isa = PBXGroup;
+			children = (
+				0249D250B6BECDF107250978 /* CompilationOrchestrator.swift */,
+				45E3F1F197EF90A4AEF8B775 /* CompilationView.swift */,
+			);
+			path = Compilation;
 			sourceTree = "<group>";
 		};
 		F05963A10D1D7E6E66EC658B /* Background */ = {
@@ -334,6 +348,8 @@
 			files = (
 				77293FA0F97806539B9CD4ED /* BackgroundProcessingV2.swift in Sources */,
 				95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */,
+				4E829B668CF908CA7303BCF1 /* CompilationOrchestrator.swift in Sources */,
+				7C08D25A7F609A69A3D0A049 /* CompilationView.swift in Sources */,
 				47564E71FFC18A092E06FD93 /* CoreModels.swift in Sources */,
 				2BEDCCAC18BE9C3410B7C192 /* DiagnosticsStore.swift in Sources */,
 				DB19202F0F7C740BCF51A698 /* DiagnosticsView.swift in Sources */,

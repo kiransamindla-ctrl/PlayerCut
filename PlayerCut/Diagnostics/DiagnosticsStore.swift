@@ -224,6 +224,9 @@ enum CounterKey: String {
     // Short / solo-practice recordings
     case shortReelProduced = "short_reel_produced"
 
+    // Compilations
+    case compilationsCreated = "compilations_created"
+
     // Errors (categorized, never with text)
     case errorCaptureFailed = "err_capture_failed"
     case errorPipelineFailed = "err_pipeline_failed"

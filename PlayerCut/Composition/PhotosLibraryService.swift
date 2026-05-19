@@ -19,7 +19,8 @@ enum PhotosLibraryService {
         case permissionDenied
     }
 
-    private static let albumTitle = "PlayerCut"
+    static let defaultAlbumTitle = "PlayerCut"
+    static let compilationAlbumTitle = "PlayerCut Compilations"
     private static let log = Logger(subsystem: "com.playercut.app",
                                     category: "Photos")
 
@@ -43,7 +44,8 @@ enum PhotosLibraryService {
     /// doesn't exist yet. Returns `.permissionDenied` when the user has
     /// not granted add-only access; the caller is responsible for the
     /// retry path.
-    static func saveReel(fileURL: URL) async -> SaveResult {
+    static func saveReel(fileURL: URL,
+                         albumTitle: String = defaultAlbumTitle) async -> SaveResult {
         var status = currentAddOnlyStatus
         if status == .notDetermined {
             status = await requestAddOnlyAuthorization()
@@ -55,10 +57,10 @@ enum PhotosLibraryService {
         }
 
         do {
-            let album = try await fetchOrCreatePlayerCutAlbum()
+            let album = try await fetchOrCreateAlbum(title: albumTitle)
             let localId = try await performSave(fileURL: fileURL, album: album)
             await DiagnosticsStore.shared.increment(.reelSavedToPhotos)
-            log.info("Saved reel to Photos: \(localId)")
+            log.info("Saved reel to '\(albumTitle)': \(localId)")
             return .saved(localIdentifier: localId)
         } catch {
             log.error("Photos save failed: \(error.localizedDescription)")
@@ -68,13 +70,13 @@ enum PhotosLibraryService {
 
     // MARK: - Internals
 
-    private static func fetchOrCreatePlayerCutAlbum() async throws -> PHAssetCollection {
-        if let existing = fetchAlbum() { return existing }
+    private static func fetchOrCreateAlbum(title: String) async throws -> PHAssetCollection {
+        if let existing = fetchAlbum(title: title) { return existing }
         return try await withCheckedThrowingContinuation { cont in
             var placeholder: PHObjectPlaceholder?
             PHPhotoLibrary.shared().performChanges {
                 let req = PHAssetCollectionChangeRequest
-                    .creationRequestForAssetCollection(withTitle: albumTitle)
+                    .creationRequestForAssetCollection(withTitle: title)
                 placeholder = req.placeholderForCreatedAssetCollection
             } completionHandler: { ok, error in
                 if !ok {
@@ -95,9 +97,9 @@ enum PhotosLibraryService {
         }
     }
 
-    private static func fetchAlbum() -> PHAssetCollection? {
+    private static func fetchAlbum(title: String) -> PHAssetCollection? {
         let options = PHFetchOptions()
-        options.predicate = NSPredicate(format: "title = %@", albumTitle)
+        options.predicate = NSPredicate(format: "title = %@", title)
         return PHAssetCollection.fetchAssetCollections(with: .album,
                                                        subtype: .any,
                                                        options: options).firstObject
