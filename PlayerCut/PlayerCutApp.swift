@@ -18,6 +18,8 @@ struct PlayerCutApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(coordinator)
+                .preferredColorScheme(.dark)
+                .tint(Theme.accent)
                 .task {
                     await coordinator.bootstrap()
                 }
@@ -67,32 +69,28 @@ struct RootView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            ZStack {
+                Theme.bgDark.ignoresSafeArea()
                 if coordinator.players.isEmpty {
                     emptyState
                 } else {
-                    populatedList
+                    populatedRoot
                 }
             }
-            .navigationTitle("PlayerCut")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
+                        Haptic.tap()
                         presentingSettings = true
                     } label: {
-                        Label("Settings", systemImage: "gear")
-                    }
-                }
-                if !coordinator.players.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            presentingCapture = true
-                        } label: {
-                            Label("Record game", systemImage: "record.circle")
-                        }
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(Theme.textPrimary)
                     }
                 }
             }
+            .toolbarBackground(Theme.bgDark, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .sheet(isPresented: $presentingEnrollment) {
                 EnrollmentRootView(
                     vm: EnrollmentViewModel(store: coordinator.store),
@@ -121,76 +119,206 @@ struct RootView: View {
         }
     }
 
+    // MARK: - Empty state
+
     private var emptyState: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 28) {
             Spacer()
-            Image(systemName: "person.crop.circle.badge.plus")
-                .font(.system(size: 72))
-                .foregroundStyle(.secondary)
-            Text("No players yet")
-                .font(.title2)
-            Button {
+            heroBrand
+            Text("No players yet.\nLet's get one on the roster.")
+                .font(.pcHeading)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 40)
+            Spacer()
+            PCPillButton(title: "Enroll a player",
+                         systemImage: "person.crop.circle.fill.badge.plus") {
                 presentingEnrollment = true
-            } label: {
-                Text("Enroll a player")
-                    .font(.title3.bold())
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding(.horizontal, 32)
-            Spacer()
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
         }
     }
 
-    private var populatedList: some View {
-        List {
-            Section("Players") {
-                ForEach(coordinator.players, id: \.id) { player in
-                    HStack {
-                        Text(player.name).font(.body)
-                        Spacer()
-                        Text("#\(player.jerseyNumber)")
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Button {
-                    presentingEnrollment = true
-                } label: {
-                    Label("Add another player", systemImage: "plus")
-                }
-            }
+    // MARK: - Populated
 
-            Section("Games") {
-                Button {
-                    presentingCompilation = true
-                } label: {
-                    Label("Combine games into compilation",
-                          systemImage: "rectangle.stack.badge.play")
+    private var populatedRoot: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    heroBrand
+                        .padding(.top, 8)
+                        .padding(.horizontal, 20)
+                    playerCards
+                    gamesStrip
                 }
-                .disabled(eligibleCompilationGames.count < 2)
-                if coordinator.games.isEmpty {
-                    Text("No games yet — tap Record to start.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(coordinator.games, id: \.id) { game in
-                        NavigationLink {
-                            GameDetailView(gameID: game.id)
-                                .environmentObject(coordinator)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(game.startedAt.formatted(
-                                    date: .abbreviated, time: .shortened))
-                                Text(game.status.rawValue)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                .padding(.bottom, 24)
+            }
+            ctaStack
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+        }
+    }
+
+    private var heroBrand: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("PlayerCut")
+                .font(.pcHero)
+                .foregroundStyle(Theme.textPrimary)
+                .textCase(.uppercase)
+                .tracking(2)
+            Rectangle()
+                .fill(Theme.accent)
+                .frame(width: 72, height: 6)
+        }
+    }
+
+    private var playerCards: some View {
+        VStack(spacing: 12) {
+            ForEach(coordinator.players, id: \.id) { player in
+                playerCard(player)
+            }
+            Button {
+                Haptic.tap()
+                presentingEnrollment = true
+            } label: {
+                HStack {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20, weight: .bold))
+                    Text("ADD PLAYER")
+                        .font(.system(size: 16, weight: .bold))
+                        .tracking(1.4)
+                    Spacer()
+                }
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(Theme.bgCard,
+                            in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private func playerCard(_ player: PlayerEnrollment) -> some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(player.name.uppercased())
+                    .font(.pcTitle)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                Text(player.sport.rawValue.uppercased())
+                    .font(.pcCaption)
+                    .tracking(1.5)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Spacer()
+            Text("#\(player.jerseyNumber)")
+                .font(.system(size: 36, weight: .black, design: .rounded))
+                .foregroundStyle(Theme.accent)
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 120)
+        .frame(maxWidth: .infinity)
+        .pcCard()
+    }
+
+    private var gamesStrip: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Recent games".uppercased())
+                .font(.pcCaption)
+                .tracking(1.5)
+                .foregroundStyle(Theme.textSecondary)
+                .padding(.horizontal, 20)
+            if coordinator.games.isEmpty {
+                Text("No games yet — tap RECORD to start.")
+                    .font(.pcBody)
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.horizontal, 20)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(coordinator.games, id: \.id) { game in
+                            NavigationLink {
+                                GameDetailView(gameID: game.id)
+                                    .environmentObject(coordinator)
+                            } label: {
+                                gameCard(game)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
+                    .padding(.horizontal, 20)
                 }
             }
+        }
+    }
+
+    private func gameCard(_ game: GameSession) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack {
+                Theme.primary.opacity(0.25)
+                Image(systemName: game.status == .completed
+                      ? "play.rectangle.fill" : "hourglass.circle.fill")
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+            }
+            .frame(width: 200, height: 120)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            Text(game.startedAt.formatted(date: .abbreviated, time: .shortened))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+
+            PCStatusChip(title: statusLabel(game.status),
+                         color: statusColor(game.status))
+        }
+        .padding(12)
+        .frame(width: 224)
+        .pcCard()
+    }
+
+    private func statusLabel(_ s: GameStatus) -> String {
+        switch s {
+        case .recording: return "REC"
+        case .awaitingProcessing: return "QUEUED"
+        case .stage1Running: return "STAGE 1"
+        case .stage2Running: return "STAGE 2"
+        case .composing: return "EXPORT"
+        case .completed: return "READY"
+        case .failed: return "FAILED"
+        }
+    }
+
+    private func statusColor(_ s: GameStatus) -> Color {
+        switch s {
+        case .completed: return Theme.success
+        case .failed: return Theme.danger
+        case .recording, .awaitingProcessing: return Theme.accent
+        default: return Theme.primary
+        }
+    }
+
+    private var ctaStack: some View {
+        VStack(spacing: 12) {
+            PCPillButton(title: "Record game",
+                         systemImage: "record.circle.fill",
+                         tint: Theme.primary,
+                         height: 64) {
+                presentingCapture = true
+            }
+            PCOutlinePillButton(title: "Compilation",
+                                systemImage: "sparkles",
+                                color: eligibleCompilationGames.count < 2
+                                    ? Theme.textSecondary
+                                    : Theme.accent,
+                                height: 56) {
+                presentingCompilation = true
+            }
+            .disabled(eligibleCompilationGames.count < 2)
+            .opacity(eligibleCompilationGames.count < 2 ? 0.5 : 1.0)
         }
     }
 

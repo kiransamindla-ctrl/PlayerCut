@@ -24,12 +24,22 @@ struct EnrollmentRootView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(.systemBackground).ignoresSafeArea()
+                Theme.bgDark.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     EnrollmentProgressBar(currentStep: vm.step)
-                        .padding(.horizontal)
-                        .padding(.top, 8)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 16)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(vm.step.title.uppercased())
+                            .font(.pcTitle)
+                            .foregroundStyle(Theme.textPrimary)
+                            .tracking(1.5)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
 
                     Group {
                         switch vm.step {
@@ -52,9 +62,11 @@ struct EnrollmentRootView: View {
                               onCancel: onCancel)
                 }
             }
-            .navigationTitle(vm.step.title)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Theme.bgDark, for: .navigationBar)
         }
+        .preferredColorScheme(.dark)
+        .tint(Theme.accent)
     }
 }
 
@@ -64,13 +76,13 @@ struct EnrollmentProgressBar: View {
     let currentStep: EnrollmentViewModel.Step
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             ForEach(EnrollmentViewModel.Step.allCases, id: \.rawValue) { step in
                 Capsule()
                     .fill(step.rawValue <= currentStep.rawValue
-                          ? Color.accentColor
-                          : Color.secondary.opacity(0.3))
-                    .frame(height: 4)
+                          ? Theme.accent
+                          : Theme.textSecondary.opacity(0.3))
+                    .frame(height: 8)
             }
         }
     }
@@ -373,49 +385,47 @@ struct BottomBar: View {
     let onCancel: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Divider()
+        VStack(spacing: 12) {
             HStack {
-                if vm.step == .identity {
-                    Button("Cancel", role: .cancel, action: onCancel)
-                } else {
-                    Button {
-                        vm.goBack()
-                    } label: {
-                        Label("Back", systemImage: "chevron.left")
-                    }
+                Button {
+                    Haptic.tap()
+                    if vm.step == .identity { onCancel() } else { vm.goBack() }
+                } label: {
+                    Text(vm.step == .identity ? "CANCEL" : "BACK")
+                        .font(.system(size: 14, weight: .bold))
+                        .tracking(1.4)
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 Spacer()
-                if vm.step == .review {
-                    Button {
-                        Task {
-                            if await vm.save(), let id = vm.savedPlayerID {
-                                onComplete(id)
-                            }
-                        }
-                    } label: {
-                        if vm.isSaving {
-                            ProgressView()
-                        } else {
-                            Text("Done").bold()
-                        }
-                    }
-                    .disabled(vm.isSaving)
-                } else {
-                    Button {
-                        vm.advance()
-                    } label: {
-                        HStack {
-                            Text("Next")
-                            Image(systemName: "chevron.right")
-                        }
-                    }
-                    .disabled(!vm.canAdvance)
-                }
             }
-            .padding()
+            if vm.step == .review {
+                PCPillButton(title: "Done",
+                             systemImage: vm.isSaving ? nil : "checkmark.circle.fill",
+                             tint: Theme.primary,
+                             height: 64) {
+                    Task {
+                        if await vm.save(), let id = vm.savedPlayerID {
+                            Haptic.success()
+                            onComplete(id)
+                        }
+                    }
+                }
+                .disabled(vm.isSaving)
+                .opacity(vm.isSaving ? 0.5 : 1)
+            } else {
+                PCPillButton(title: "Next",
+                             systemImage: "arrow.right.circle.fill",
+                             tint: vm.canAdvance ? Theme.primary : Theme.textSecondary,
+                             height: 64) {
+                    vm.advance()
+                }
+                .disabled(!vm.canAdvance)
+                .opacity(vm.canAdvance ? 1 : 0.5)
+            }
         }
-        .background(.regularMaterial)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Theme.bgDark)
     }
 }
 

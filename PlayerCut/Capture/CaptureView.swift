@@ -34,6 +34,7 @@ struct CaptureView: View {
     @State private var configured = false
     @State private var sessionReelLength: ReelLength
     @State private var showingLengthPicker = false
+    @State private var armedPulse = false
 
     init(player: PlayerEnrollment) {
         self.player = player
@@ -108,61 +109,41 @@ struct CaptureView: View {
 
     private var topBar: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 6) {
-                Button("Close") {
-                    if isRecording { stop() }
-                    dismiss()
-                }
-                .foregroundStyle(.white)
-
-                // Per-game reel length override. Disabled mid-record so
-                // we don't change targets on a session that's already
-                // counting down.
-                Button {
-                    showingLengthPicker = true
-                } label: {
-                    Label(sessionReelLength.rawValue, systemImage: "ruler")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.gray)
-                .disabled(isRecording)
-                .confirmationDialog("Reel length",
-                                    isPresented: $showingLengthPicker,
-                                    titleVisibility: .visible) {
-                    ForEach(ReelLength.allCases, id: \.self) { length in
-                        Button(length.displayName) { sessionReelLength = length }
-                    }
+            // Length pill (left). Disabled mid-record so we don't change
+            // targets on a session that's already counting down.
+            Button {
+                Haptic.tap()
+                showingLengthPicker = true
+            } label: {
+                Text(sessionReelLength.rawValue.uppercased())
+                    .font(.system(size: 16, weight: .black))
+                    .tracking(1.5)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .foregroundStyle(Theme.textPrimary)
+                    .background(Theme.bgCard.opacity(0.9), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(isRecording)
+            .opacity(isRecording ? 0.4 : 1)
+            .confirmationDialog("Reel length",
+                                isPresented: $showingLengthPicker,
+                                titleVisibility: .visible) {
+                ForEach(ReelLength.allCases, id: \.self) { length in
+                    Button(length.displayName) { sessionReelLength = length }
                 }
             }
+
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 6) {
-                if isRecording {
-                    Text(formatElapsed(elapsed))
-                        .font(.system(.title3, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.red.opacity(0.7), in: Capsule())
-                } else {
-                    // Small fallback manual-start button — always available
-                    // regardless of whether auto-start is enabled.
-                    Button {
-                        cancelAutoStart()
-                        start(trigger: .manual)
-                    } label: {
-                        Label("Start", systemImage: "record.circle")
-                            .font(.caption.bold())
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .disabled(!configured)
-                }
+            Button {
+                Haptic.tap()
+                if isRecording { stop() }
+                dismiss()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 28, weight: .bold))
+                    .foregroundStyle(Theme.textPrimary.opacity(0.85))
             }
         }
     }
@@ -170,65 +151,87 @@ struct CaptureView: View {
     @ViewBuilder
     private var statusIndicator: some View {
         if isRecording {
-            Label("Recording", systemImage: "circle.fill")
-                .foregroundStyle(.red)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
+            PCStatusChip(title: "● RECORDING  \(formatElapsed(elapsed))",
+                         color: Theme.danger)
                 .padding(.bottom, 12)
         } else if let n = autoStartCountdown {
-            VStack(spacing: 8) {
-                Text("Mounted! Starting in \(n)…")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(Color.green.opacity(0.85), in: Capsule())
-                Button("Cancel auto-start") { cancelAutoStartByUser() }
-                    .buttonStyle(.bordered)
-                    .tint(.white)
+            VStack(spacing: 12) {
+                PCStatusChip(title: "MOUNTED — STARTING IN \(n)",
+                             color: Theme.success)
+                Button {
+                    Haptic.warning()
+                    cancelAutoStartByUser()
+                } label: {
+                    Text("CANCEL")
+                        .font(.system(size: 14, weight: .bold))
+                        .tracking(1.4)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(Theme.textPrimary)
+                        .overlay(Capsule().stroke(Theme.textPrimary, lineWidth: 2))
+                }
+                .buttonStyle(.plain)
             }
             .padding(.bottom, 12)
         } else if autoStartEnabled {
-            Text(mountStatusLabel(mountState))
-                .font(.callout)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
+            PCStatusChip(title: mountStatusLabel(mountState),
+                         color: mountStatusColor(mountState))
                 .padding(.bottom, 12)
         } else {
-            Text("Auto-start disabled — tap Start")
-                .font(.callout)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
+            PCStatusChip(title: "AUTO-START OFF — TAP RECORD",
+                         color: Theme.bgCard.opacity(0.9))
                 .padding(.bottom, 12)
         }
     }
 
     private var bottomBar: some View {
         Button {
-            if isRecording { stop() } else { start(trigger: .manual) }
+            if isRecording { Haptic.warning(); stop() }
+            else { start(trigger: .manual) }
         } label: {
-            Text(isRecording ? "Stop" : "Start")
-                .font(.title2.bold())
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
+            ZStack {
+                // Outer ring
+                Circle()
+                    .stroke(Theme.textPrimary.opacity(0.9), lineWidth: 5)
+                    .frame(width: 96, height: 96)
+                // Inner fill — square when recording, circle when armed
+                if isRecording {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.danger)
+                        .frame(width: 38, height: 38)
+                } else {
+                    Circle()
+                        .fill(Theme.danger)
+                        .frame(width: 80, height: 80)
+                        .scaleEffect(armedPulse ? 1.0 : 0.94)
+                        .animation(.easeInOut(duration: 0.9)
+                            .repeatForever(autoreverses: true),
+                                   value: armedPulse)
+                        .onAppear { armedPulse = true }
+                }
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .tint(isRecording ? .gray : .red)
+        .buttonStyle(.plain)
         .disabled(!configured)
+        .opacity(configured ? 1 : 0.4)
+        .padding(.bottom, 8)
+    }
+
+    private func mountStatusColor(_ s: MountDetector.State) -> Color {
+        switch s {
+        case .unknown, .moving: return Theme.bgCard.opacity(0.9)
+        case .stable:           return Theme.accent
+        case .mounted:          return Theme.success
+        }
     }
 
     // MARK: - Mount detection wiring
 
     private func mountStatusLabel(_ s: MountDetector.State) -> String {
         switch s {
-        case .unknown, .moving: return "Hold steady — detecting mount…"
-        case .stable:           return "Almost ready…"
-        case .mounted:          return "Mounted"
+        case .unknown, .moving: return "DETECTING MOUNT"
+        case .stable:           return "ALMOST READY"
+        case .mounted:          return "MOUNTED"
         }
     }
 

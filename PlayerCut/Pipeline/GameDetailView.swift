@@ -31,16 +31,20 @@ struct GameDetailView: View {
     @State private var retryingPermission = false
 
     var body: some View {
-        Group {
+        ZStack {
+            Theme.bgDark.ignoresSafeArea()
             if let game {
                 content(for: game)
             } else {
                 ProgressView("Loading…")
+                    .tint(Theme.accent)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle("Game")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.bgDark, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .task { await reload() }
         .onReceive(refreshTimer) { _ in Task { await reload() } }
     }
@@ -59,29 +63,44 @@ struct GameDetailView: View {
     @ViewBuilder
     private func completedContent(for game: GameSession) -> some View {
         if let assetId = game.exportedReelAssetId {
-            // Reel is in Photos. Load and play.
-            VStack(spacing: 12) {
-                if let item = playerItem {
-                    VideoPlayer(player: AVPlayer(playerItem: item))
-                        .frame(maxWidth: .infinity)
-                        .aspectRatio(9.0 / 16.0, contentMode: .fit)
-                } else {
-                    ProgressView("Loading reel from Photos…")
-                        .frame(maxWidth: .infinity)
-                        .aspectRatio(9.0 / 16.0, contentMode: .fit)
-                        .task { await loadPlayerItem(assetId: assetId) }
+            VStack(spacing: 0) {
+                ZStack {
+                    Color.black
+                    if let item = playerItem {
+                        VideoPlayer(player: AVPlayer(playerItem: item))
+                    } else {
+                        ProgressView("Loading from Photos…")
+                            .tint(Theme.accent)
+                            .task { await loadPlayerItem(assetId: assetId) }
+                    }
                 }
-                Button {
-                    presentingShare = true
-                } label: {
-                    Label("Share reel", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                HStack(spacing: 12) {
+                    PCPillButton(title: "Share",
+                                 systemImage: "square.and.arrow.up.fill",
+                                 tint: Theme.accent,
+                                 height: 64) {
+                        presentingShare = true
+                    }
+                    Button {
+                        Haptic.warning()
+                        // Deletion-from-history isn't wired yet (the
+                        // PHAsset belongs to the user and the local
+                        // game record is metadata-only). Future work.
+                    } label: {
+                        Text("DELETE")
+                            .font(.system(size: 14, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 18)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.horizontal)
-                Spacer()
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .background(Theme.bgDark)
             }
             .sheet(isPresented: $presentingShare) {
                 if let asset = PhotosLibraryService.fetchAsset(localIdentifier: assetId) {
@@ -91,8 +110,9 @@ struct GameDetailView: View {
         } else if let fallback = game.localReelFallbackURL {
             permissionDeniedFallback(for: game, fallback: fallback)
         } else {
-            Text("Reel is missing.")
-                .foregroundStyle(.secondary)
+            Text("REEL MISSING")
+                .font(.pcHeading)
+                .foregroundStyle(Theme.textSecondary)
                 .padding()
         }
     }
@@ -136,54 +156,63 @@ struct GameDetailView: View {
 
     @ViewBuilder
     private func processingContent(for game: GameSession) -> some View {
-        VStack(spacing: 16) {
+        VStack(alignment: .leading, spacing: 24) {
             Spacer()
-            ProgressView()
-                .controlSize(.large)
             Text(statusLabel(game.status))
-                .font(.headline)
+                .font(.pcTitle)
+                .foregroundStyle(Theme.textPrimary)
+                .tracking(1)
+            StadiumLightBar(stage: stageIndex(game.status))
+                .frame(height: 28)
             Text("Started \(game.startedAt.formatted(date: .abbreviated, time: .shortened))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.pcCaption)
+                .foregroundStyle(Theme.textSecondary)
 
             if game.status == .awaitingProcessing || game.status == .failed {
-                Button {
+                PCPillButton(title: manualRun == nil ? "Process Now" : "Processing…",
+                             systemImage: "play.fill",
+                             tint: Theme.accent,
+                             height: 64) {
                     runNow(gameID: game.id)
-                } label: {
-                    Label(manualRun == nil ? "Process Now" : "Processing…",
-                          systemImage: "play.circle")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
                 .disabled(manualRun != nil)
-                .padding(.horizontal)
+                .opacity(manualRun == nil ? 1 : 0.5)
             }
 
             if let manualRunLog {
                 Text(manualRunLog)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary)
             }
 
             Spacer()
         }
-        .padding()
+        .padding(20)
+    }
+
+    /// Maps a GameStatus to a 0-based stage index for the progress bar.
+    private func stageIndex(_ s: GameStatus) -> Int {
+        switch s {
+        case .recording, .awaitingProcessing: return 0
+        case .stage1Running: return 1
+        case .stage2Running: return 2
+        case .composing: return 3
+        case .completed: return 4
+        case .failed: return -1
+        }
     }
 
     // MARK: - Helpers
 
     private func statusLabel(_ status: GameStatus) -> String {
         switch status {
-        case .recording: return "Recording…"
-        case .awaitingProcessing: return "Waiting to process"
-        case .stage1Running: return "Processing — Stage 1 (coarse detection)"
-        case .stage2Running: return "Processing — Stage 2 (player ID)"
-        case .composing: return "Processing — composing reel"
-        case .completed: return "Completed"
-        case .failed: return "Failed"
+        case .recording: return "RECORDING…"
+        case .awaitingProcessing: return "WAITING TO PROCESS"
+        case .stage1Running: return "STAGE 1 — COARSE DETECTION"
+        case .stage2Running: return "STAGE 2 — PLAYER ID"
+        case .composing: return "COMPOSING REEL"
+        case .completed: return "READY"
+        case .failed: return "FAILED"
         }
     }
 
@@ -260,6 +289,43 @@ struct GameDetailView: View {
             }
             retryingPermission = false
         }
+    }
+}
+
+// MARK: - Stadium-light progress bar
+
+/// Four thick segments that fill green in order as Stage 1 → Stage 2 →
+/// Composition → Done. The current stage pulses; future stages are dim.
+struct StadiumLightBar: View {
+    let stage: Int
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(0..<4) { i in
+                segment(filled: i < stage,
+                        active: i == stage,
+                        failed: stage < 0 && i == 0)
+            }
+        }
+        .onAppear { pulse = true }
+    }
+
+    @ViewBuilder
+    private func segment(filled: Bool, active: Bool, failed: Bool) -> some View {
+        let color: Color = {
+            if failed { return Theme.danger }
+            if filled { return Theme.success }
+            if active { return Theme.accent }
+            return Theme.bgCard
+        }()
+        Capsule()
+            .fill(color)
+            .opacity(active ? (pulse ? 1.0 : 0.55) : 1.0)
+            .animation(active
+                       ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true)
+                       : .default,
+                       value: pulse)
     }
 }
 
