@@ -18,8 +18,11 @@ struct CaptureView: View {
 
     let player: PlayerEnrollment
 
-    @StateObject private var mount = MountDetector()
-    @State private var autoStartDisabled = false
+    @AppStorage(SettingsKeys.autoStartEnabled) private var autoStartEnabled = true
+
+    @State private var mount = MountDetector()
+    @State private var mountState: MountDetector.State = .unknown
+    @State private var mountTask: Task<Void, Never>?
     @State private var autoStartTask: Task<Void, Never>?
     @State private var autoStartCountdown: Int? = nil
     @State private var autoStartedAt: Date?     // for false-positive accounting
@@ -69,22 +72,36 @@ struct CaptureView: View {
                 }
             }
         }
-        .onAppear {
-            configureIfNeeded()
-            mount.start()
-        }
-        .onDisappear {
-            mount.stop()
-            autoStartTask?.cancel()
-        }
-        .onChange(of: mount.state) { _, newValue in
-            handleMountStateChange(newValue)
-        }
+        .onAppear { onAppear() }
+        .onDisappear { onDisappear() }
         .onReceive(timer) { _ in
             if let startedAt {
                 elapsed = Date().timeIntervalSince(startedAt)
             }
         }
+    }
+
+    // MARK: - Lifecycle
+
+    private func onAppear() {
+        configureIfNeeded()
+        if autoStartEnabled {
+            mount.start()
+            mountTask = Task { @MainActor in
+                for await s in mount.states {
+                    mountState = s
+                    handleMountStateChange(s)
+                }
+            }
+        }
+    }
+
+    private func onDisappear() {
+        mount.stop()
+        mountTask?.cancel()
+        mountTask = nil
+        autoStartTask?.cancel()
+        autoStartTask = nil
     }
 
     // MARK: - Subviews
@@ -131,8 +148,8 @@ struct CaptureView: View {
                         .padding(.vertical, 6)
                         .background(Color.red.opacity(0.7), in: Capsule())
                 } else {
-                    // Small fallback manual-start button while we wait for
-                    // mount detection to fire.
+                    // Small fallback manual-start button — always available
+                    // regardless of whether auto-start is enabled.
                     Button {
                         cancelAutoStart()
                         start(trigger: .manual)
@@ -145,44 +162,50 @@ struct CaptureView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
                     .disabled(!configured)
-
-                    Toggle("Disable auto-start", isOn: $autoStartDisabled)
-                        .toggleStyle(.button)
-                        .font(.caption2)
-                        .tint(.gray)
-                        .onChange(of: autoStartDisabled) { _, off in
-                            if off { cancelAutoStart() }
-                        }
                 }
             }
         }
     }
 
+    @ViewBuilder
     private var statusIndicator: some View {
-        Group {
-            if isRecording {
-                Label("Recording", systemImage: "circle.fill")
-                    .foregroundStyle(.red)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
-            } else if let n = autoStartCountdown {
+        if isRecording {
+            Label("Recording", systemImage: "circle.fill")
+                .foregroundStyle(.red)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.bottom, 12)
+        } else if let n = autoStartCountdown {
+            VStack(spacing: 8) {
                 Text("Mounted! Starting in \(n)…")
                     .font(.headline)
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Color.green.opacity(0.8), in: Capsule())
-            } else {
-                Text(mountStatusLabel(mount.state))
-                    .font(.callout)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .background(Color.green.opacity(0.85), in: Capsule())
+                Button("Cancel auto-start") { cancelAutoStartByUser() }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
             }
+            .padding(.bottom, 12)
+        } else if autoStartEnabled {
+            Text(mountStatusLabel(mountState))
+                .font(.callout)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.bottom, 12)
+        } else {
+            Text("Auto-start disabled — tap Start")
+                .font(.callout)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.bottom, 12)
         }
-        .padding(.bottom, 12)
     }
 
     private var bottomBar: some View {
@@ -202,17 +225,15 @@ struct CaptureView: View {
     // MARK: - Mount detection wiring
 
     private func mountStatusLabel(_ s: MountDetector.State) -> String {
-        if autoStartDisabled { return "Auto-start disabled — tap Start" }
         switch s {
-        case .unknown: return "Detecting mount…"
-        case .moving:  return "Move the phone onto a tripod"
-        case .stable:  return "Holding steady — keep it still"
-        case .mounted: return "Mounted"
+        case .unknown, .moving: return "Hold steady — detecting mount…"
+        case .stable:           return "Almost ready…"
+        case .mounted:          return "Mounted"
         }
     }
 
     private func handleMountStateChange(_ s: MountDetector.State) {
-        guard !isRecording, !autoStartDisabled else { return }
+        guard !isRecording else { return }
         switch s {
         case .mounted:
             beginAutoStartCountdown()
@@ -232,7 +253,7 @@ struct CaptureView: View {
                 autoStartCountdown = n
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 if Task.isCancelled { return }
-                if autoStartDisabled || mount.state != .mounted {
+                if mountState != .mounted {
                     autoStartCountdown = nil
                     autoStartTask = nil
                     return
@@ -242,6 +263,13 @@ struct CaptureView: View {
             autoStartTask = nil
             start(trigger: .mountDetected)
         }
+    }
+
+    /// User-initiated cancel from the on-screen Cancel button. Counts as
+    /// a false positive so we can track over-eager mount detection.
+    private func cancelAutoStartByUser() {
+        Task { await DiagnosticsStore.shared.increment(.autoStartFalsePositive) }
+        cancelAutoStart()
     }
 
     private func cancelAutoStart() {

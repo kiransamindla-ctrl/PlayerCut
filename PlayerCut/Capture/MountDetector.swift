@@ -2,59 +2,66 @@
 //  MountDetector.swift
 //  PlayerCut/Capture
 //
-//  Watches Core Motion to decide whether the phone is sitting on a tripod
-//  in landscape, motionless, and ready to record. The capture UI uses this
-//  to auto-start a session without requiring a tap.
+//  Watches Core Motion to decide whether the phone is on a tripod in
+//  landscape, motionless, and ready to record. The capture UI consumes
+//  the published state to auto-start a session without requiring a tap.
 //
 //  Heuristics — tuned for "hand puts phone on tripod, walks 5 ft away":
-//   - Orientation: gravity vector points mostly along ±x (landscape) with
-//     small y/z components. Threshold 0.9 along x, 0.3 elsewhere.
-//   - Angular stillness: instantaneous rotation-rate magnitude < 0.05 rad/s
-//     for every sample in a 10-second rolling window.
-//   - Translational stillness: variance of userAcceleration magnitude over
-//     the rolling window stays under 0.01 g² (filters hand tremor).
-//
-//  The detector emits state transitions only — duplicate states are
-//  swallowed so SwiftUI doesn't churn.
+//   - Landscape orientation: the phone's long axis is roughly horizontal,
+//     so gravity points mostly along ±x. We check the simpler condition
+//     |gravity.y| < 0.3 AND |gravity.z| < 0.3 (which implies |gravity.x|
+//     is close to 1 since gravity is unit-length).
+//   - Angular stillness: instantaneous |ω| < 0.05 rad/s.
+//   - Translational stillness: variance of userAcceleration over a 2-second
+//     rolling window < 0.005 g² (filters hand tremor).
+//   - All three must hold continuously for 10 seconds to promote to
+//     .mounted; any disqualifying frame resets the clock.
 //
 
-import Combine
 import CoreMotion
 import Foundation
 import os.log
 
 @MainActor
-final class MountDetector: ObservableObject {
+final class MountDetector {
 
     enum State: String, Equatable {
         case unknown        // not started, or motion unavailable
         case moving         // hand-held / actively being repositioned
-        case stable         // landscape + still, but not yet for 10s
+        case stable         // landscape + still, but not yet for 10 s
         case mounted        // sustained stable → safe to auto-start
     }
 
-    @Published private(set) var state: State = .unknown
+    /// Subscribe with `for await s in detector.states { … }`. Single-
+    /// consumer stream; the detector buffers the most recent change so a
+    /// late subscriber catches up without missing the latest transition.
+    let states: AsyncStream<State>
+    private(set) var state: State = .unknown
 
-    /// Seconds the detector needs to remain in `.stable` before promoting
-    /// to `.mounted`. Exposed for tests / tuning, not for runtime change.
     let stabilityWindow: TimeInterval = 10.0
+    let varianceWindow: TimeInterval = 2.0
 
     private let motionManager = CMMotionManager()
     private let log = Logger(subsystem: "com.playercut.app", category: "Mount")
     private let sampleHz: Double = 20
+    private var continuation: AsyncStream<State>.Continuation?
 
-    // Rolling window of user-acceleration magnitudes for variance.
-    private var accelSamples: [Double] = []
-    private var rotMagSamples: [Double] = []
+    // Rolling window of userAcceleration components for variance.
+    private var accelSamples: [(x: Double, y: Double, z: Double)] = []
 
-    // First time we entered .stable in the current quiet streak. Reset to
-    // nil whenever any qualifying condition fails.
+    // First time we entered a qualifying state in the current quiet
+    // streak. Reset to nil whenever any condition fails.
     private var stableSince: Date?
 
+    init() {
+        var c: AsyncStream<State>.Continuation!
+        states = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { c = $0 }
+        continuation = c
+    }
+
     deinit {
-        // Stop on the global queue — CMMotionManager is thread-safe for
-        // this call and we can't reliably hop to main from deinit.
         motionManager.stopDeviceMotionUpdates()
+        continuation?.finish()
     }
 
     func start() {
@@ -75,9 +82,11 @@ final class MountDetector: ObservableObject {
     func stop() {
         motionManager.stopDeviceMotionUpdates()
         accelSamples.removeAll(keepingCapacity: true)
-        rotMagSamples.removeAll(keepingCapacity: true)
         stableSince = nil
-        if state != .unknown { state = .unknown }
+        if state != .unknown {
+            state = .unknown
+            continuation?.yield(.unknown)
+        }
         log.info("MountDetector stopped")
     }
 
@@ -85,28 +94,32 @@ final class MountDetector: ObservableObject {
 
     private func process(_ motion: CMDeviceMotion) {
         let g = motion.gravity
-        let isLandscape = abs(g.x) > 0.9 && abs(g.y) < 0.3 && abs(g.z) < 0.3
+        // Landscape: gravity has tiny y/z components → it points along
+        // the device's x-axis (left/right edge).
+        let isLandscape = abs(g.y) < 0.3 && abs(g.z) < 0.3
 
         let r = motion.rotationRate
         let rotMag = sqrt(r.x * r.x + r.y * r.y + r.z * r.z)
+        let stillRotation = rotMag < 0.05
+
+        // Translational stillness: variance of userAcceleration over the
+        // last 2 s. We use the SUMMED per-axis variance so a wobble in
+        // any direction registers.
         let a = motion.userAcceleration
-        let accMag = sqrt(a.x * a.x + a.y * a.y + a.z * a.z)
+        accelSamples.append((a.x, a.y, a.z))
+        let cap = Int(varianceWindow * sampleHz)
+        if accelSamples.count > cap { accelSamples.removeFirst() }
+        let accelVar = summedVariance(of: accelSamples)
+        let stillAccel = accelVar < 0.005
 
-        appendRolling(rotMagSamples: rotMag, accelMag: accMag)
-
-        let windowAngularStill =
-            !rotMagSamples.isEmpty && rotMagSamples.allSatisfy { $0 < 0.05 }
-        let accelVariance = variance(of: accelSamples)
-        let windowAccelStill = accelVariance < 0.01
-
-        let qualifies = isLandscape && windowAngularStill && windowAccelStill
+        let qualifies = isLandscape && stillRotation && stillAccel
 
         let newState: State
         if !qualifies {
             stableSince = nil
-            // Distinguish "almost there" from "actively moving" — only the
-            // instantaneous still + landscape gate fires `.stable`.
-            if isLandscape && rotMag < 0.05 {
+            // Distinguish "almost there" from "actively moving": only the
+            // instantaneous landscape + still-rotation gate fires .stable.
+            if isLandscape && stillRotation {
                 newState = .stable
             } else {
                 newState = .moving
@@ -118,25 +131,24 @@ final class MountDetector: ObservableObject {
         }
 
         if newState != state {
-            log.info("state \(self.state.rawValue) → \(newState.rawValue) (rot=\(rotMag, format: .fixed(precision: 3)) accVar=\(accelVariance, format: .fixed(precision: 4)) landscape=\(isLandscape))")
+            log.info("state \(self.state.rawValue) → \(newState.rawValue) (rot=\(rotMag, format: .fixed(precision: 3)) accVar=\(accelVar, format: .fixed(precision: 4)) landscape=\(isLandscape))")
             state = newState
+            continuation?.yield(newState)
         }
     }
 
-    private func appendRolling(rotMagSamples rot: Double, accelMag: Double) {
-        let cap = Int(stabilityWindow * sampleHz)  // 200 at 10s × 20Hz
-        rotMagSamples.append(rot)
-        if rotMagSamples.count > cap { rotMagSamples.removeFirst() }
-        accelSamples.append(accelMag)
-        if accelSamples.count > cap { accelSamples.removeFirst() }
-    }
-
-    private func variance(of values: [Double]) -> Double {
-        guard values.count > 1 else { return 0 }
-        let mean = values.reduce(0, +) / Double(values.count)
-        let sq = values.reduce(0) { acc, v in
-            acc + (v - mean) * (v - mean)
+    private func summedVariance(of samples: [(x: Double, y: Double, z: Double)])
+        -> Double {
+        guard samples.count > 1 else { return 0 }
+        let n = Double(samples.count)
+        let mx = samples.reduce(0) { $0 + $1.x } / n
+        let my = samples.reduce(0) { $0 + $1.y } / n
+        let mz = samples.reduce(0) { $0 + $1.z } / n
+        var sum = 0.0
+        for s in samples {
+            let dx = s.x - mx, dy = s.y - my, dz = s.z - mz
+            sum += dx * dx + dy * dy + dz * dz
         }
-        return sq / Double(values.count)
+        return sum / n
     }
 }

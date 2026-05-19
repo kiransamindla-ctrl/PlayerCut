@@ -62,6 +62,7 @@ struct RootView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @State private var presentingEnrollment = false
     @State private var presentingCapture = false
+    @State private var presentingSettings = false
 
     var body: some View {
         NavigationStack {
@@ -74,6 +75,13 @@ struct RootView: View {
             }
             .navigationTitle("PlayerCut")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        presentingSettings = true
+                    } label: {
+                        Label("Settings", systemImage: "gear")
+                    }
+                }
                 if !coordinator.players.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -93,6 +101,9 @@ struct RootView: View {
                     },
                     onCancel: { presentingEnrollment = false }
                 )
+            }
+            .sheet(isPresented: $presentingSettings) {
+                SettingsView()
             }
             .fullScreenCover(isPresented: $presentingCapture) {
                 if let player = coordinator.players.first {

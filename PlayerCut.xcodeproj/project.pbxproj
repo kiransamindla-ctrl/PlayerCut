@@ -28,6 +28,7 @@
 		98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */; };
 		AAFAFC89E3DAF7A44493BBDB /* ReelComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */; };
 		AC884A0EE2C853B09CF99F29 /* Stage1CoarseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4ABAD3A6EB6390A240D3D85 /* Stage1CoarseDetector.swift */; };
+		AD09D28462766010CD8C2FF7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 187D5FFFEF59F0D468549019 /* SettingsView.swift */; };
 		BDB2E933B46DDE3FF5DC5B1F /* JerseyOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7F1E1FE1AD12D18BD49B744 /* JerseyOCR.swift */; };
 		C9884D22FDD42935BA622E96 /* EvaluationHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = B99F55F63E923EEF3B3AC8B4 /* EvaluationHarness.swift */; };
 		D22548D9D37ACB6C5E6F1323 /* EnrollmentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D749DFAEDD43402C90FC8DCD /* EnrollmentViewModel.swift */; };
@@ -46,6 +47,7 @@
 
 /* Begin PBXFileReference section */
 		15E5B7E9DE36AFADB13EEA06 /* MountDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MountDetector.swift; sourceTree = "<group>"; };
+		187D5FFFEF59F0D468549019 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		26C24C5163D5195F4DEDE1C1 /* PixelBufferPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelBufferPool.swift; sourceTree = "<group>"; };
 		2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelComposer.swift; sourceTree = "<group>"; };
 		3005B7F01FC9B5D7223D127F /* PlayerCut.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PlayerCut.entitlements; sourceTree = "<group>"; };
@@ -122,6 +124,14 @@
 			path = Diagnostics;
 			sourceTree = "<group>";
 		};
+		5EF5C369F8F9F8920717F8A8 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				187D5FFFEF59F0D468549019 /* SettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
 		682C45CB67498D2F97B7E3AC /* PlayerCutTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -170,6 +180,7 @@
 				A6E69C15F5984733BCE1A741 /* Models */,
 				040510C1D500D87A3432FA78 /* Performance */,
 				6BDEE8DCC9FD448CE0617D8F /* Pipeline */,
+				5EF5C369F8F9F8920717F8A8 /* Settings */,
 				3467D7D39BE9D5C05C2F2B63 /* Stages */,
 				7341658E3DA20545202AEAF3 /* Storage */,
 				FCE117C717C73927C2B861C0 /* Tuning */,
@@ -337,6 +348,7 @@
 				1C48996C7F483E9693707056 /* PixelBufferPool.swift in Sources */,
 				98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */,
 				AAFAFC89E3DAF7A44493BBDB /* ReelComposer.swift in Sources */,
+				AD09D28462766010CD8C2FF7 /* SettingsView.swift in Sources */,
 				AC884A0EE2C853B09CF99F29 /* Stage1CoarseDetector.swift in Sources */,
 				1DF8E171D165ADB0303F2654 /* Stage2PlayerLocalizer.swift in Sources */,
 				973D37FB0B8590D6F3869DDA /* Storage.swift in Sources */,
