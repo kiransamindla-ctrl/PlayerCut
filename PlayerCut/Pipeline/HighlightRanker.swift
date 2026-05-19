@@ -30,6 +30,32 @@ struct RankerConfig {
     var minClips: Int = 8
     var maxClips: Int = 14
     var exceptionalScoreThreshold: Float = 0.85
+
+    /// Preset tuned per reel length. Longer reels relax diversity
+    /// (more clips fit) and lean on slightly longer per-clip durations.
+    static func `for`(length: ReelLength) -> RankerConfig {
+        var c = RankerConfig()
+        c.targetTotalDuration = length.targetSeconds
+        switch length {
+        case .sixtySeconds:
+            c.minClips = 10; c.maxClips = 14
+            c.minClipDuration = 4; c.maxClipDuration = 6
+            c.minSeparation = 30
+        case .twoMinutes:
+            c.minClips = 18; c.maxClips = 24
+            c.minClipDuration = 5; c.maxClipDuration = 7
+            c.minSeparation = 25
+        case .threeMinutes:
+            c.minClips = 25; c.maxClips = 35
+            c.minClipDuration = 6; c.maxClipDuration = 8
+            c.minSeparation = 20
+        case .fiveMinutes:
+            c.minClips = 40; c.maxClips = 55
+            c.minClipDuration = 6; c.maxClipDuration = 10
+            c.minSeparation = 15
+        }
+        return c
+    }
 }
 
 final class HighlightRanker {

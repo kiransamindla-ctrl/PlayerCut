@@ -15,16 +15,27 @@ final class ReelComposer {
 
     private let log = Logger(subsystem: "com.playercut.app", category: "Composer")
 
-    private let outputSize = CGSize(width: 1080, height: 1920)
     private let crossfade: Double = 0.3
-    private let exportPreset = AVAssetExportPresetHEVC1920x1080  // we'll override
+
+    /// 1080p for ≤3 min reels; 720p for 5 min so the MP4 stays
+    /// share-friendly (~150 MB at 1080p, ~50 MB at 720p).
+    private func outputSize(for length: ReelLength) -> CGSize {
+        switch length {
+        case .fiveMinutes:
+            return CGSize(width: 720, height: 1280)
+        default:
+            return CGSize(width: 1080, height: 1920)
+        }
+    }
 
     func compose(plan: ReelPlan,
                  game: GameSession,
                  player: PlayerEnrollment,
+                 length: ReelLength,
                  musicURL: URL?,
                  outputURL: URL) async throws -> URL {
 
+        let outputSize = outputSize(for: length)
         let composition = AVMutableComposition()
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = outputSize
@@ -71,6 +82,7 @@ final class ReelComposer {
                                                assetTrack: assetVideoTrack,
                                                at: insertTime,
                                                duration: clipDuration,
+                                               outputSize: outputSize,
                                                isFirst: index == 0,
                                                isLast: index == plan.selected.count - 1)
             instructions.append(instr)
@@ -139,6 +151,7 @@ final class ReelComposer {
         assetTrack: AVAssetTrack,
         at startTime: CMTime,
         duration: CMTime,
+        outputSize: CGSize,
         isFirst: Bool,
         isLast: Bool
     ) -> AVMutableVideoCompositionInstruction {
@@ -161,9 +174,11 @@ final class ReelComposer {
         let endCenter = smoothed.last ?? startCenter
 
         let startTransform = transformForCenter(startCenter,
-                                                sourceSize: assetTrack.naturalSize)
+                                                sourceSize: assetTrack.naturalSize,
+                                                outputSize: outputSize)
         let endTransform = transformForCenter(endCenter,
-                                              sourceSize: assetTrack.naturalSize)
+                                              sourceSize: assetTrack.naturalSize,
+                                              outputSize: outputSize)
 
         layer.setTransformRamp(fromStart: startTransform,
                                toEnd: endTransform,
@@ -196,7 +211,8 @@ final class ReelComposer {
     }
 
     private func transformForCenter(_ center: CGPoint,
-                                    sourceSize: CGSize) -> CGAffineTransform {
+                                    sourceSize: CGSize,
+                                    outputSize: CGSize) -> CGAffineTransform {
         // Source is 1920x1080 landscape. We want a 9:16 viewport centered on
         // `center` (normalized 0..1 in source), scaled to fill 1080x1920 output.
         // Compute the crop window width in source pixels:

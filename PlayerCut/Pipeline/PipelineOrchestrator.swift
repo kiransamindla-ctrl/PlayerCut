@@ -15,7 +15,6 @@ actor PipelineOrchestrator {
     private let log = Logger(subsystem: "com.playercut.app", category: "Orchestrator")
     private let stage1 = Stage1CoarseDetector()
     private let stage2 = Stage2PlayerLocalizer()
-    private let ranker = HighlightRanker()
     private let composer = ReelComposer()
     private let store: GameStore
 
@@ -65,6 +64,9 @@ actor PipelineOrchestrator {
 
                     await DiagnosticsStore.shared.recordDailyEvent(.appOpened)
                     await DiagnosticsStore.shared.recordEnum(.sport, value: game.sport)
+                    await DiagnosticsStore.shared.recordEnum(
+                        .reelLength,
+                        value: game.reelLengthOverride ?? player.reelLengthPreference)
 
                     // Stage 1
                     continuation.yield(.stage1Started)
@@ -100,9 +102,14 @@ actor PipelineOrchestrator {
                     continuation.yield(.stage2Completed(
                         momentCount: stage2Result.moments.count))
 
-                    // Ranking
+                    // Resolve target reel length: per-game override beats
+                    // the player's stored default.
+                    let length = game.reelLengthOverride ?? player.reelLengthPreference
+
+                    // Ranking — config preset is keyed off the reel length.
                     let rankingStart = Date()
-                    let plan = self.ranker.selectClips(from: stage2Result.moments)
+                    let ranker = HighlightRanker(config: .for(length: length))
+                    let plan = ranker.selectClips(from: stage2Result.moments)
                     await DiagnosticsStore.shared.recordDuration(
                         .ranking,
                         seconds: Date().timeIntervalSince(rankingStart))
@@ -125,6 +132,7 @@ actor PipelineOrchestrator {
                     let url = try await self.composer.compose(plan: plan,
                                                               game: game,
                                                               player: player,
+                                                              length: length,
                                                               musicURL: musicURL,
                                                               outputURL: outputURL)
                     await DiagnosticsStore.shared.recordDuration(

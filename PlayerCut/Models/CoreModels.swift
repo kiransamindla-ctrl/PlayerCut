@@ -20,6 +20,66 @@ struct PlayerEnrollment: Codable, Identifiable {
     var faceEmbedding: [Float]         // 128-D from VNGenerateFaceEmbeddingRequest
     var sport: Sport
     var createdAt: Date
+    var reelLengthPreference: ReelLength = .sixtySeconds
+
+    init(id: UUID,
+         name: String,
+         jerseyNumber: String,
+         jerseyColorHSV: HSVHistogram,
+         faceEmbedding: [Float],
+         sport: Sport,
+         createdAt: Date,
+         reelLengthPreference: ReelLength = .sixtySeconds) {
+        self.id = id
+        self.name = name
+        self.jerseyNumber = jerseyNumber
+        self.jerseyColorHSV = jerseyColorHSV
+        self.faceEmbedding = faceEmbedding
+        self.sport = sport
+        self.createdAt = createdAt
+        self.reelLengthPreference = reelLengthPreference
+    }
+
+    // Back-compat decode for players enrolled before reelLengthPreference
+    // existed — they fall back to the 60s default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        jerseyNumber = try c.decode(String.self, forKey: .jerseyNumber)
+        jerseyColorHSV = try c.decode(HSVHistogram.self, forKey: .jerseyColorHSV)
+        faceEmbedding = try c.decode([Float].self, forKey: .faceEmbedding)
+        sport = try c.decode(Sport.self, forKey: .sport)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        reelLengthPreference = try c.decodeIfPresent(ReelLength.self,
+                                                     forKey: .reelLengthPreference) ?? .sixtySeconds
+    }
+}
+
+/// User-selectable target length of the final highlight reel.
+enum ReelLength: String, CaseIterable, Codable {
+    case sixtySeconds = "60s"
+    case twoMinutes = "2min"
+    case threeMinutes = "3min"
+    case fiveMinutes = "5min"
+
+    var targetSeconds: Double {
+        switch self {
+        case .sixtySeconds: return 60
+        case .twoMinutes:   return 120
+        case .threeMinutes: return 180
+        case .fiveMinutes:  return 300
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .sixtySeconds: return "60 sec"
+        case .twoMinutes:   return "2 min"
+        case .threeMinutes: return "3 min"
+        case .fiveMinutes:  return "5 min"
+        }
+    }
 }
 
 enum Sport: String, Codable {
@@ -75,6 +135,9 @@ struct GameSession: Codable, Identifiable {
     var exportedReelURL: URL?
     var status: GameStatus = .recording
     var triggerSource: TriggerSource = .manual
+    /// nil → use the player's `reelLengthPreference`. Set per-game from
+    /// the capture UI so users can override without changing their default.
+    var reelLengthOverride: ReelLength?
 
     init(id: UUID,
          playerId: UUID,
@@ -87,7 +150,8 @@ struct GameSession: Codable, Identifiable {
          stage2Result: Stage2Result?,
          exportedReelURL: URL?,
          status: GameStatus = .recording,
-         triggerSource: TriggerSource = .manual) {
+         triggerSource: TriggerSource = .manual,
+         reelLengthOverride: ReelLength? = nil) {
         self.id = id
         self.playerId = playerId
         self.sport = sport
@@ -100,10 +164,12 @@ struct GameSession: Codable, Identifiable {
         self.exportedReelURL = exportedReelURL
         self.status = status
         self.triggerSource = triggerSource
+        self.reelLengthOverride = reelLengthOverride
     }
 
-    // Custom decode so games persisted before triggerSource existed
-    // still round-trip — they fall back to .manual.
+    // Custom decode so games persisted before triggerSource /
+    // reelLengthOverride existed still round-trip — they fall back to
+    // .manual and nil respectively.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -118,6 +184,7 @@ struct GameSession: Codable, Identifiable {
         exportedReelURL = try c.decodeIfPresent(URL.self, forKey: .exportedReelURL)
         status = try c.decodeIfPresent(GameStatus.self, forKey: .status) ?? .recording
         triggerSource = try c.decodeIfPresent(TriggerSource.self, forKey: .triggerSource) ?? .manual
+        reelLengthOverride = try c.decodeIfPresent(ReelLength.self, forKey: .reelLengthOverride)
     }
 }
 

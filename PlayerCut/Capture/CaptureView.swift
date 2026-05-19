@@ -29,6 +29,13 @@ struct CaptureView: View {
     @State private var elapsed: TimeInterval = 0
     @State private var errorMessage: String?
     @State private var configured = false
+    @State private var sessionReelLength: ReelLength
+    @State private var showingLengthPicker = false
+
+    init(player: PlayerEnrollment) {
+        self.player = player
+        _sessionReelLength = State(initialValue: player.reelLengthPreference)
+    }
 
     private let log = Logger(subsystem: "com.playercut.app", category: "CaptureUI")
     private let timer = Timer.publish(every: 0.5, on: .main, in: .common)
@@ -84,11 +91,35 @@ struct CaptureView: View {
 
     private var topBar: some View {
         HStack(alignment: .top) {
-            Button("Close") {
-                if isRecording { stop() }
-                dismiss()
+            VStack(alignment: .leading, spacing: 6) {
+                Button("Close") {
+                    if isRecording { stop() }
+                    dismiss()
+                }
+                .foregroundStyle(.white)
+
+                // Per-game reel length override. Disabled mid-record so
+                // we don't change targets on a session that's already
+                // counting down.
+                Button {
+                    showingLengthPicker = true
+                } label: {
+                    Label(sessionReelLength.rawValue, systemImage: "ruler")
+                        .font(.caption.bold())
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.gray)
+                .disabled(isRecording)
+                .confirmationDialog("Reel length",
+                                    isPresented: $showingLengthPicker,
+                                    titleVisibility: .visible) {
+                    ForEach(ReelLength.allCases, id: \.self) { length in
+                        Button(length.displayName) { sessionReelLength = length }
+                    }
+                }
             }
-            .foregroundStyle(.white)
             Spacer()
 
             VStack(alignment: .trailing, spacing: 6) {
@@ -234,10 +265,13 @@ struct CaptureView: View {
 
     private func start(trigger: TriggerSource) {
         do {
+            let override: ReelLength? = (sessionReelLength == player.reelLengthPreference)
+                ? nil : sessionReelLength
             _ = try coordinator.captureController.startRecording(
                 for: player,
                 sport: player.sport,
-                triggerSource: trigger)
+                triggerSource: trigger,
+                reelLengthOverride: override)
             startedAt = Date()
             isRecording = true
             errorMessage = nil

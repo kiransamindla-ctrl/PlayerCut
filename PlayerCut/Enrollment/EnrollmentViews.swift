@@ -39,6 +39,8 @@ struct EnrollmentRootView: View {
                             JerseyColorStepView(vm: vm)
                         case .selfie:
                             SelfieStepView(vm: vm)
+                        case .reelLength:
+                            ReelLengthStepView(vm: vm)
                         case .review:
                             ReviewStepView(vm: vm)
                         }
@@ -287,7 +289,31 @@ struct SelfieStepView: View {
     }
 }
 
-// MARK: - Step 4: review
+// MARK: - Step 4: reel length
+
+struct ReelLengthStepView: View {
+    @ObservedObject var vm: EnrollmentViewModel
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Reel length", selection: $vm.reelLengthPreference) {
+                    ForEach(ReelLength.allCases, id: \.self) { length in
+                        Text(length.displayName).tag(length)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } header: {
+                Text("Preferred reel length")
+            } footer: {
+                Text("Longer reels capture more of the game but take longer to process.")
+            }
+        }
+    }
+}
+
+// MARK: - Step 5: review
 
 struct ReviewStepView: View {
     @ObservedObject var vm: EnrollmentViewModel
@@ -298,6 +324,7 @@ struct ReviewStepView: View {
                 LabeledContent("Name", value: vm.name)
                 LabeledContent("Jersey #", value: vm.jerseyNumber)
                 LabeledContent("Sport", value: vm.sport.rawValue.capitalized)
+                LabeledContent("Reel length", value: vm.reelLengthPreference.displayName)
             }
 
             Section("Identification signals") {

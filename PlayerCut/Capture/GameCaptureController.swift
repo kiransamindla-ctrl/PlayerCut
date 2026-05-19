@@ -113,7 +113,8 @@ final class GameCaptureController: NSObject {
 
     func startRecording(for player: PlayerEnrollment,
                         sport: Sport,
-                        triggerSource: TriggerSource = .manual) throws -> GameSession {
+                        triggerSource: TriggerSource = .manual,
+                        reelLengthOverride: ReelLength? = nil) throws -> GameSession {
         let id = UUID()
         let dir = StoragePaths.gameDirectory(for: id)
         try FileManager.default.createDirectory(at: dir,
@@ -141,7 +142,8 @@ final class GameCaptureController: NSObject {
                                stage2Result: nil,
                                exportedReelURL: nil,
                                status: .recording,
-                               triggerSource: triggerSource)
+                               triggerSource: triggerSource,
+                               reelLengthOverride: reelLengthOverride)
         currentSession = game
         log.info("Recording started: \(id.uuidString) trigger=\(triggerSource.rawValue)")
         return game

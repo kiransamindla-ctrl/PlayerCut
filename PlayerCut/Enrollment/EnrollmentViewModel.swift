@@ -44,13 +44,15 @@ final class EnrollmentViewModel: ObservableObject {
         case identity = 0
         case jerseyColor = 1
         case selfie = 2
-        case review = 3
+        case reelLength = 3
+        case review = 4
 
         var title: String {
             switch self {
             case .identity: return "Who is this for?"
             case .jerseyColor: return "Jersey color"
             case .selfie: return "Add a photo"
+            case .reelLength: return "Preferred reel length"
             case .review: return "Review"
             }
         }
@@ -62,6 +64,7 @@ final class EnrollmentViewModel: ObservableObject {
     @Published var name: String = ""
     @Published var jerseyNumber: String = ""
     @Published var sport: Sport = .soccer
+    @Published var reelLengthPreference: ReelLength = .sixtySeconds
 
     @Published var sampledJerseyImage: UIImage?
     @Published var jerseyColorHistogram: HSVHistogram?
@@ -96,6 +99,8 @@ final class EnrollmentViewModel: ObservableObject {
             return jerseyColorHistogram != nil
         case .selfie:
             return faceEmbedding != nil && faceQualityIssues.isEmpty
+        case .reelLength:
+            return true
         case .review:
             return true
         }
@@ -332,7 +337,8 @@ final class EnrollmentViewModel: ObservableObject {
             jerseyColorHSV: histogram,
             faceEmbedding: embedding,
             sport: sport,
-            createdAt: Date()
+            createdAt: Date(),
+            reelLengthPreference: reelLengthPreference
         )
         do {
             try await store.upsert(player)

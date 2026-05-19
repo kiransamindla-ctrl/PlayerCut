@@ -235,6 +235,7 @@ enum EnumKey: String {
     case sport = "sport"
     case deviceModel = "device_model"
     case iosMajorVersion = "ios_major_version"
+    case reelLength = "reel_length"
 }
 
 enum DailyEventKey: String {
