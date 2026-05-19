@@ -117,7 +117,8 @@ actor EvaluationHarness {
             audioLoudnessURL: game.audioLoudnessURL,
             stage1Result: nil,
             stage2Result: nil,
-            exportedReelURL: nil,
+            exportedReelAssetId: nil,
+            localReelFallbackURL: nil,
             status: .awaitingProcessing
         )
 
@@ -178,9 +179,11 @@ actor EvaluationHarness {
         // feedback patterns. Heavy emphasis on importance-weighted recall
         // (missing the goal is unforgivable) plus a light penalty for
         // including obvious junk (low precision = boring reel).
-        let satisfaction = 0.7 * importanceWeighted
-                         + 0.2 * reelMetrics.precision
-                         + 0.1 * Float(min(plan.selected.count, 12)) / 12.0
+        let clipCountTerm: Float = Float(min(plan.selected.count, 12)) / 12.0
+        let satisfaction: Float =
+            0.7 * importanceWeighted
+            + 0.2 * reelMetrics.precision
+            + 0.1 * clipCountTerm
 
         return GameEvalResult(
             gameID: game.id,

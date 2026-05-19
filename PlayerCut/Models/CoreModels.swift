@@ -132,7 +132,15 @@ struct GameSession: Codable, Identifiable {
     var audioLoudnessURL: URL
     var stage1Result: Stage1Result?
     var stage2Result: Stage2Result?
-    var exportedReelURL: URL?
+    /// PHAsset.localIdentifier of the reel saved into the user's Photos
+    /// library. nil before the reel is saved, or if Photos access was
+    /// denied (in which case `localReelFallbackURL` holds the file
+    /// locally until the user retries).
+    var exportedReelAssetId: String?
+    /// Set only when Photos save failed (typically permission denied).
+    /// File lives in the durable game directory so it survives across
+    /// launches and can be re-uploaded via the GameDetailView retry path.
+    var localReelFallbackURL: URL?
     var status: GameStatus = .recording
     var triggerSource: TriggerSource = .manual
     /// nil → use the player's `reelLengthPreference`. Set per-game from
@@ -148,7 +156,8 @@ struct GameSession: Codable, Identifiable {
          audioLoudnessURL: URL,
          stage1Result: Stage1Result?,
          stage2Result: Stage2Result?,
-         exportedReelURL: URL?,
+         exportedReelAssetId: String? = nil,
+         localReelFallbackURL: URL? = nil,
          status: GameStatus = .recording,
          triggerSource: TriggerSource = .manual,
          reelLengthOverride: ReelLength? = nil) {
@@ -161,15 +170,16 @@ struct GameSession: Codable, Identifiable {
         self.audioLoudnessURL = audioLoudnessURL
         self.stage1Result = stage1Result
         self.stage2Result = stage2Result
-        self.exportedReelURL = exportedReelURL
+        self.exportedReelAssetId = exportedReelAssetId
+        self.localReelFallbackURL = localReelFallbackURL
         self.status = status
         self.triggerSource = triggerSource
         self.reelLengthOverride = reelLengthOverride
     }
 
-    // Custom decode so games persisted before triggerSource /
-    // reelLengthOverride existed still round-trip — they fall back to
-    // .manual and nil respectively.
+    // Custom decode for back-compat across schema migrations:
+    //   - exportedReelURL (pre-PHAsset) → ignored; assetId defaults nil
+    //   - triggerSource / reelLengthOverride defaults if absent
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -181,7 +191,8 @@ struct GameSession: Codable, Identifiable {
         audioLoudnessURL = try c.decode(URL.self, forKey: .audioLoudnessURL)
         stage1Result = try c.decodeIfPresent(Stage1Result.self, forKey: .stage1Result)
         stage2Result = try c.decodeIfPresent(Stage2Result.self, forKey: .stage2Result)
-        exportedReelURL = try c.decodeIfPresent(URL.self, forKey: .exportedReelURL)
+        exportedReelAssetId = try c.decodeIfPresent(String.self, forKey: .exportedReelAssetId)
+        localReelFallbackURL = try c.decodeIfPresent(URL.self, forKey: .localReelFallbackURL)
         status = try c.decodeIfPresent(GameStatus.self, forKey: .status) ?? .recording
         triggerSource = try c.decodeIfPresent(TriggerSource.self, forKey: .triggerSource) ?? .manual
         reelLengthOverride = try c.decodeIfPresent(ReelLength.self, forKey: .reelLengthOverride)

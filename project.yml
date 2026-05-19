@@ -29,7 +29,7 @@ targets:
         CFBundleDisplayName: PlayerCut
         NSCameraUsageDescription: Record your child's game.
         NSMicrophoneUsageDescription: Detect crowd reactions for highlight detection.
-        NSPhotoLibraryAddUsageDescription: Save your highlight reels.
+        NSPhotoLibraryAddUsageDescription: Save your highlight reels to your Photos library so they live with your other videos.
         UIBackgroundModes:
           - processing
           - fetch

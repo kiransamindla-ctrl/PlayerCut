@@ -30,7 +30,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Detect crowd reactions for highlight detection.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Save your highlight reels.</string>
+	<string>Save your highlight reels to your Photos library so they live with your other videos.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>

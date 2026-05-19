@@ -216,6 +216,11 @@ enum CounterKey: String {
     case autoStartTriggered = "auto_start_triggered"
     case autoStartFalsePositive = "auto_start_false_positive"
 
+    // Zero-video-storage policy
+    case rawVideoDeleted = "raw_video_deleted"
+    case reelSavedToPhotos = "reel_saved_to_photos"
+    case photoLibraryPermissionDenied = "photo_library_permission_denied"
+
     // Errors (categorized, never with text)
     case errorCaptureFailed = "err_capture_failed"
     case errorPipelineFailed = "err_pipeline_failed"

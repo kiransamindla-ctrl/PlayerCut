@@ -15,6 +15,8 @@ enum StoragePaths {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
+    /// Durable metadata only. Raw video and audio never live here under
+    /// the zero-video-storage policy.
     static var gamesRoot: URL {
         documents.appendingPathComponent("games")
     }
@@ -33,6 +35,37 @@ enum StoragePaths {
 
     static func gameMetadataURL(for id: UUID) -> URL {
         gameDirectory(for: id).appendingPathComponent("metadata.json")
+    }
+
+    // MARK: - Ephemeral working area (zero-video-storage policy)
+
+    /// Volatile working area. iOS may evict files here under storage
+    /// pressure. Raw video, audio loudness, and intermediate reels live
+    /// here and are deleted as soon as the reel is safely in Photos.
+    static var tempGamesRoot: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("games")
+    }
+
+    static func tempGameDirectory(for id: UUID) -> URL {
+        tempGamesRoot.appendingPathComponent(id.uuidString)
+    }
+
+    static func tempRawVideoURL(for id: UUID) -> URL {
+        tempGameDirectory(for: id).appendingPathComponent("raw.mov")
+    }
+
+    static func tempAudioLoudnessURL(for id: UUID) -> URL {
+        tempGameDirectory(for: id).appendingPathComponent("audio_loudness.json")
+    }
+
+    static func tempReelURL(for id: UUID) -> URL {
+        tempGameDirectory(for: id).appendingPathComponent("reel.mp4")
+    }
+
+    /// Where we keep a reel if Photos access is denied: in the durable
+    /// gameDirectory (not tmp) so a retry works after an app relaunch.
+    static func fallbackReelURL(for id: UUID) -> URL {
+        gameDirectory(for: id).appendingPathComponent("reel.mp4")
     }
 }
 

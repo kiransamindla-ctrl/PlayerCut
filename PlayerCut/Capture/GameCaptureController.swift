@@ -116,12 +116,15 @@ final class GameCaptureController: NSObject {
                         triggerSource: TriggerSource = .manual,
                         reelLengthOverride: ReelLength? = nil) throws -> GameSession {
         let id = UUID()
-        let dir = StoragePaths.gameDirectory(for: id)
+        // Raw recording is ephemeral under the zero-video-storage policy.
+        // The orchestrator deletes both these files once the reel is in
+        // the Photos library.
+        let dir = StoragePaths.tempGameDirectory(for: id)
         try FileManager.default.createDirectory(at: dir,
                                                 withIntermediateDirectories: true)
 
-        let videoURL = dir.appendingPathComponent("raw.mov")
-        let audioURL = dir.appendingPathComponent("audio_loudness.json")
+        let videoURL = StoragePaths.tempRawVideoURL(for: id)
+        let audioURL = StoragePaths.tempAudioLoudnessURL(for: id)
 
         loudnessSamples.removeAll(keepingCapacity: true)
         loudnessSampleCounter = 0
@@ -140,7 +143,8 @@ final class GameCaptureController: NSObject {
                                audioLoudnessURL: audioURL,
                                stage1Result: nil,
                                stage2Result: nil,
-                               exportedReelURL: nil,
+                               exportedReelAssetId: nil,
+                               localReelFallbackURL: nil,
                                status: .recording,
                                triggerSource: triggerSource,
                                reelLengthOverride: reelLengthOverride)

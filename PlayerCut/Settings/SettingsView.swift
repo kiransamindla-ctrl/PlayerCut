@@ -33,12 +33,16 @@ struct SettingsView: View {
                     Text("When auto-start is on, PlayerCut watches for the phone being placed on a tripod and begins recording after a 3-second grace period.")
                 }
 
-                Section("Privacy") {
+                Section {
                     Button {
                         presentingDiagnostics = true
                     } label: {
                         Label("Diagnostics", systemImage: "chart.bar")
                     }
+                } header: {
+                    Text("Privacy")
+                } footer: {
+                    Text("PlayerCut never stores your child's video. Reels live in your Photos. Raw recordings are deleted the moment the reel is made.")
                 }
             }
             .navigationTitle("Settings")

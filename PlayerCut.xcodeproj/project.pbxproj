@@ -21,6 +21,7 @@
 		64C548F37D75D1160461F9EC /* HighlightRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE476586888DDD7EBAF974F7 /* HighlightRanker.swift */; };
 		77293FA0F97806539B9CD4ED /* BackgroundProcessingV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A1075CB059A40D14F1DB938 /* BackgroundProcessingV2.swift */; };
 		77AC3FA3FD3BFEE9753A8DBE /* VisionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCC38D5C5EAD3E535D6E04E /* VisionPipeline.swift */; };
+		7963F03D10881DD2110E0650 /* PhotosLibraryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4308B6B004B4F6FD5EA08C6 /* PhotosLibraryService.swift */; };
 		812C3853AFDB715B9AD1938E /* EnrollmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 608D09E55BF686A8910AF245 /* EnrollmentViews.swift */; };
 		85DCFCCA63858A8469FDE82E /* PlayerCutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0F8A80B4A9C591C60B82B5 /* PlayerCutTests.swift */; };
 		95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24D4CA15A14D5F147D77A85 /* CaptureView.swift */; };
@@ -65,6 +66,7 @@
 		99CD75C3C4488657399E44F3 /* DiagnosticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsStore.swift; sourceTree = "<group>"; };
 		AE892148703051040369F4C6 /* PlayerCutTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlayerCutTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B24D4CA15A14D5F147D77A85 /* CaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureView.swift; sourceTree = "<group>"; };
+		B4308B6B004B4F6FD5EA08C6 /* PhotosLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryService.swift; sourceTree = "<group>"; };
 		B4ABAD3A6EB6390A240D3D85 /* Stage1CoarseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stage1CoarseDetector.swift; sourceTree = "<group>"; };
 		B942A1811EDCD3B97ADF0516 /* GameDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameDetailView.swift; sourceTree = "<group>"; };
 		B99F55F63E923EEF3B3AC8B4 /* EvaluationHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvaluationHarness.swift; sourceTree = "<group>"; };
@@ -92,6 +94,7 @@
 		2CBB61FEF264F3A88FC5DB10 /* Composition */ = {
 			isa = PBXGroup;
 			children = (
+				B4308B6B004B4F6FD5EA08C6 /* PhotosLibraryService.swift */,
 				2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */,
 			);
 			path = Composition;
@@ -344,6 +347,7 @@
 				BDB2E933B46DDE3FF5DC5B1F /* JerseyOCR.swift in Sources */,
 				5EB45B86F5AF7896651CC407 /* LabeledCorpus.swift in Sources */,
 				590C2FD54A568CE9A0F3CD5D /* MountDetector.swift in Sources */,
+				7963F03D10881DD2110E0650 /* PhotosLibraryService.swift in Sources */,
 				044E3F26F254BBF88FC025F0 /* PipelineOrchestrator.swift in Sources */,
 				1C48996C7F483E9693707056 /* PixelBufferPool.swift in Sources */,
 				98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */,

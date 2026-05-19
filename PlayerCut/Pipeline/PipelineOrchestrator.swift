@@ -125,29 +125,50 @@ actor PipelineOrchestrator {
                     try await self.store.upsert(game)
                     continuation.yield(.composing)
 
-                    let outputURL = StoragePaths
-                        .gameDirectory(for: game.id)
-                        .appendingPathComponent("reel.mp4")
+                    // Reel is composed into a temp file. ReelComposer will
+                    // try to land it in Photos and either return an
+                    // assetId (good) or a fallback file URL (Photos denied).
+                    let outputURL = StoragePaths.tempReelURL(for: game.id)
+                    try? FileManager.default.createDirectory(
+                        at: outputURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true)
                     let composeStart = Date()
-                    let url = try await self.composer.compose(plan: plan,
-                                                              game: game,
-                                                              player: player,
-                                                              length: length,
-                                                              musicURL: musicURL,
-                                                              outputURL: outputURL)
+                    let composeResult = try await self.composer.compose(
+                        plan: plan,
+                        game: game,
+                        player: player,
+                        length: length,
+                        musicURL: musicURL,
+                        outputURL: outputURL)
                     await DiagnosticsStore.shared.recordDuration(
                         .composition,
                         seconds: Date().timeIntervalSince(composeStart))
-                    game.exportedReelURL = url
+                    game.exportedReelAssetId = composeResult.assetId
+                    game.localReelFallbackURL = composeResult.fallbackURL
                     game.status = .completed
                     try await self.store.upsert(game)
+
+                    // Zero-video-storage policy: once the reel is in the
+                    // Photos library, delete the raw recording. If we
+                    // only have a local fallback (Photos denied), keep
+                    // raw + audio in place so a retry is possible.
+                    if composeResult.savedToPhotos {
+                        await self.deleteEphemeralVideoFiles(for: game)
+                    } else {
+                        self.log.warning("Reel kept locally; raw video retained pending retry")
+                    }
 
                     await DiagnosticsStore.shared.increment(.reelsCompleted)
                     await DiagnosticsStore.shared.recordDuration(
                         .totalPipeline,
                         seconds: Date().timeIntervalSince(pipelineStart))
 
-                    continuation.yield(.completed(reelURL: url))
+                    // Surface the reel URL the UI can use right now:
+                    // the in-Photos copy lives behind a PHAsset id, so
+                    // we yield the fallback URL or the temp output for
+                    // immediate playback. GameDetailView decides which.
+                    let yieldURL = composeResult.fallbackURL ?? outputURL
+                    continuation.yield(.completed(reelURL: yieldURL))
                 } catch {
                     self.log.error("Pipeline failed: \(error.localizedDescription)")
                     await DiagnosticsStore.shared.increment(.reelsFailed)
@@ -167,6 +188,35 @@ actor PipelineOrchestrator {
                 }
                 continuation.finish()
             }
+        }
+    }
+
+    /// Removes raw video + audio loudness once the reel is safely landed
+    /// in the Photos library. Best-effort: if a delete fails we log and
+    /// move on rather than failing the pipeline — the file lives in tmp
+    /// and iOS will reclaim it under storage pressure regardless.
+    private func deleteEphemeralVideoFiles(for game: GameSession) async {
+        let fm = FileManager.default
+        var anyDeleted = false
+        for url in [game.rawVideoURL, game.audioLoudnessURL] {
+            if fm.fileExists(atPath: url.path) {
+                do {
+                    try fm.removeItem(at: url)
+                    anyDeleted = true
+                    log.info("Deleted ephemeral file: \(url.lastPathComponent)")
+                } catch {
+                    log.error("Couldn't delete \(url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+        }
+        // Try to clean up the per-game tmp directory if it's empty now.
+        let dir = StoragePaths.tempGameDirectory(for: game.id)
+        if let contents = try? fm.contentsOfDirectory(atPath: dir.path),
+           contents.isEmpty {
+            try? fm.removeItem(at: dir)
+        }
+        if anyDeleted {
+            await DiagnosticsStore.shared.increment(.rawVideoDeleted)
         }
     }
 }
