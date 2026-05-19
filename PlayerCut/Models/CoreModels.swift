@@ -121,6 +121,14 @@ enum TriggerSource: String, Codable {
     case calendarPreSchedule
 }
 
+/// Coarse capture environment — chosen at recording start from a
+/// one-shot scene-luminance sample. Drives camera white-balance lock
+/// choice (indoor fluorescent vs outdoor daylight).
+enum SceneType: String, Codable {
+    case indoor
+    case outdoor
+}
+
 /// Top-level record for one recorded game.
 struct GameSession: Codable, Identifiable {
     let id: UUID
@@ -146,6 +154,7 @@ struct GameSession: Codable, Identifiable {
     /// nil → use the player's `reelLengthPreference`. Set per-game from
     /// the capture UI so users can override without changing their default.
     var reelLengthOverride: ReelLength?
+    var sceneType: SceneType = .outdoor
 
     init(id: UUID,
          playerId: UUID,
@@ -160,7 +169,8 @@ struct GameSession: Codable, Identifiable {
          localReelFallbackURL: URL? = nil,
          status: GameStatus = .recording,
          triggerSource: TriggerSource = .manual,
-         reelLengthOverride: ReelLength? = nil) {
+         reelLengthOverride: ReelLength? = nil,
+         sceneType: SceneType = .outdoor) {
         self.id = id
         self.playerId = playerId
         self.sport = sport
@@ -175,11 +185,12 @@ struct GameSession: Codable, Identifiable {
         self.status = status
         self.triggerSource = triggerSource
         self.reelLengthOverride = reelLengthOverride
+        self.sceneType = sceneType
     }
 
     // Custom decode for back-compat across schema migrations:
     //   - exportedReelURL (pre-PHAsset) → ignored; assetId defaults nil
-    //   - triggerSource / reelLengthOverride defaults if absent
+    //   - triggerSource / reelLengthOverride / sceneType defaults if absent
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -196,6 +207,7 @@ struct GameSession: Codable, Identifiable {
         status = try c.decodeIfPresent(GameStatus.self, forKey: .status) ?? .recording
         triggerSource = try c.decodeIfPresent(TriggerSource.self, forKey: .triggerSource) ?? .manual
         reelLengthOverride = try c.decodeIfPresent(ReelLength.self, forKey: .reelLengthOverride)
+        sceneType = try c.decodeIfPresent(SceneType.self, forKey: .sceneType) ?? .outdoor
     }
 }
 

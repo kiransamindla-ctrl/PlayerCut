@@ -292,26 +292,31 @@ struct CaptureView: View {
     }
 
     private func start(trigger: TriggerSource) {
-        do {
-            let override: ReelLength? = (sessionReelLength == player.reelLengthPreference)
-                ? nil : sessionReelLength
-            _ = try coordinator.captureController.startRecording(
-                for: player,
-                sport: player.sport,
-                triggerSource: trigger,
-                reelLengthOverride: override)
-            startedAt = Date()
-            isRecording = true
-            errorMessage = nil
-            if trigger == .mountDetected {
-                autoStartedAt = Date()
-                Task { await DiagnosticsStore.shared.increment(.autoStartTriggered) }
-            } else {
-                autoStartedAt = nil
+        let override: ReelLength? = (sessionReelLength == player.reelLengthPreference)
+            ? nil : sessionReelLength
+        // startRecording is async because it does a pre-flight scene-
+        // luminance sample before locking white balance. Kick it off in
+        // a Task so the SwiftUI handler stays sync.
+        Task {
+            do {
+                _ = try await coordinator.captureController.startRecording(
+                    for: player,
+                    sport: player.sport,
+                    triggerSource: trigger,
+                    reelLengthOverride: override)
+                startedAt = Date()
+                isRecording = true
+                errorMessage = nil
+                if trigger == .mountDetected {
+                    autoStartedAt = Date()
+                    await DiagnosticsStore.shared.increment(.autoStartTriggered)
+                } else {
+                    autoStartedAt = nil
+                }
+            } catch {
+                errorMessage = "Couldn't start: \(error.localizedDescription)"
+                log.error("startRecording failed: \(error.localizedDescription)")
             }
-        } catch {
-            errorMessage = "Couldn't start: \(error.localizedDescription)"
-            log.error("startRecording failed: \(error.localizedDescription)")
         }
     }
 

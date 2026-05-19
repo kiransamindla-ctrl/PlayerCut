@@ -27,6 +27,10 @@ final class GameCaptureController: NSObject {
     private var loudnessSamples: [LoudnessSample] = []
     private var loudnessSampleCounter = 0
 
+    /// Cached so startRecording can re-lock white balance with scene-
+    /// specific params after the luminance pre-flight.
+    private var videoDevice: AVCaptureDevice?
+
     /// We sample loudness at 5 Hz (every 6th audio buffer at 30 Hz delivery).
     private let loudnessDownsample = 6
 
@@ -49,7 +53,8 @@ final class GameCaptureController: NSObject {
                                                         position: .back) else {
             throw PipelineError.captureFailed("No back camera")
         }
-        try lockCameraForGame(videoDevice)
+        try lockCameraForGame(videoDevice, scene: .outdoor)
+        self.videoDevice = videoDevice
         let videoInput = try AVCaptureDeviceInput(device: videoDevice)
         guard session.canAddInput(videoInput) else {
             throw PipelineError.captureFailed("Cannot add video input")
@@ -92,7 +97,13 @@ final class GameCaptureController: NSObject {
 
     /// Lock focus, exposure, and white balance at game start. Tripod is static —
     /// auto-anything causes pumping/flicker and burns battery.
-    private func lockCameraForGame(_ device: AVCaptureDevice) throws {
+    ///
+    /// Scene-aware: indoor venues get a tight fluorescent-targeted WB
+    /// lock (4000 K, neutral tint) which kills the green cast typical
+    /// of school-gym lighting; outdoor venues lock at whatever WB the
+    /// camera auto-detected, which copes well with daylight + cloud.
+    private func lockCameraForGame(_ device: AVCaptureDevice,
+                                   scene: SceneType) throws {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
         if device.isFocusModeSupported(.locked) {
@@ -102,11 +113,77 @@ final class GameCaptureController: NSObject {
             device.exposureMode = .locked
         }
         if device.isWhiteBalanceModeSupported(.locked) {
-            device.whiteBalanceMode = .locked
+            switch scene {
+            case .indoor:
+                let target = AVCaptureDevice
+                    .WhiteBalanceTemperatureAndTintValues(temperature: 4000,
+                                                          tint: 0)
+                var gains = device.deviceWhiteBalanceGains(for: target)
+                gains = Self.clampGains(gains,
+                                        max: device.maxWhiteBalanceGain)
+                device.setWhiteBalanceModeLocked(with: gains) { _ in }
+            case .outdoor:
+                device.whiteBalanceMode = .locked
+            }
         }
         // 30 fps, locked
         device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
         device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
+    }
+
+    private static func clampGains(_ gains: AVCaptureDevice.WhiteBalanceGains,
+                                   max maxGain: Float)
+        -> AVCaptureDevice.WhiteBalanceGains {
+        func clamp(_ g: Float) -> Float { min(max(1.0, g), maxGain) }
+        return AVCaptureDevice.WhiteBalanceGains(
+            redGain: clamp(gains.redGain),
+            greenGain: clamp(gains.greenGain),
+            blueGain: clamp(gains.blueGain))
+    }
+
+    // MARK: - Scene detection (pre-flight luminance sample)
+
+    /// One-shot pre-flight: starts the session if needed, taps a single
+    /// video frame, returns `.indoor` if mean Y-plane luminance is
+    /// below 0.3 (gym/practice room), `.outdoor` otherwise. Times out at
+    /// 2 s with `.outdoor` so a misbehaving device never blocks
+    /// recording start.
+    private func sampleSceneType() async -> SceneType {
+        let dataOutput = AVCaptureVideoDataOutput()
+        dataOutput.videoSettings = [
+            kCVPixelBufferPixelFormatTypeKey as String:
+                Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
+        ]
+        let delegate = SceneLuminanceDelegate()
+        let queue = DispatchQueue(label: "playercut.scene.detect")
+        dataOutput.setSampleBufferDelegate(delegate, queue: queue)
+
+        session.beginConfiguration()
+        guard session.canAddOutput(dataOutput) else {
+            session.commitConfiguration()
+            log.warning("Scene detect: cannot add data output, defaulting outdoor")
+            return .outdoor
+        }
+        session.addOutput(dataOutput)
+        session.commitConfiguration()
+
+        if !session.isRunning {
+            session.startRunning()
+        }
+
+        let luminance = await delegate.firstLuminance(timeoutSeconds: 2.0)
+
+        session.beginConfiguration()
+        session.removeOutput(dataOutput)
+        session.commitConfiguration()
+
+        guard let lum = luminance else {
+            log.warning("Scene detect: timed out, defaulting outdoor")
+            return .outdoor
+        }
+        let scene: SceneType = lum < 0.3 ? .indoor : .outdoor
+        log.info("Scene detect: luminance=\(lum, format: .fixed(precision: 3)) → \(scene.rawValue)")
+        return scene
     }
 
     // MARK: - Lifecycle
@@ -114,7 +191,7 @@ final class GameCaptureController: NSObject {
     func startRecording(for player: PlayerEnrollment,
                         sport: Sport,
                         triggerSource: TriggerSource = .manual,
-                        reelLengthOverride: ReelLength? = nil) throws -> GameSession {
+                        reelLengthOverride: ReelLength? = nil) async throws -> GameSession {
         let id = UUID()
         // Raw recording is ephemeral under the zero-video-storage policy.
         // The orchestrator deletes both these files once the reel is in
@@ -128,6 +205,14 @@ final class GameCaptureController: NSObject {
 
         loudnessSamples.removeAll(keepingCapacity: true)
         loudnessSampleCounter = 0
+
+        // Pre-flight: detect scene + re-lock WB with scene-appropriate
+        // params before the actual recording starts. Defaults outdoor on
+        // any failure so we never block the user from recording.
+        let scene = await sampleSceneType()
+        if let device = videoDevice {
+            try? lockCameraForGame(device, scene: scene)
+        }
 
         if !session.isRunning {
             session.startRunning()
@@ -147,9 +232,10 @@ final class GameCaptureController: NSObject {
                                localReelFallbackURL: nil,
                                status: .recording,
                                triggerSource: triggerSource,
-                               reelLengthOverride: reelLengthOverride)
+                               reelLengthOverride: reelLengthOverride,
+                               sceneType: scene)
         currentSession = game
-        log.info("Recording started: \(id.uuidString) trigger=\(triggerSource.rawValue)")
+        log.info("Recording started: \(id.uuidString) trigger=\(triggerSource.rawValue) scene=\(scene.rawValue)")
         return game
     }
 
@@ -239,5 +325,74 @@ extension GameCaptureController: AVCaptureAudioDataOutputSampleBufferDelegate {
 
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
         loudnessSamples.append(LoudnessSample(t: presentationTime, rms: rms))
+    }
+}
+
+// MARK: - Scene luminance delegate
+
+/// Captures one frame from a temporary AVCaptureVideoDataOutput, computes
+/// the mean Y-plane value, and resolves a single continuation with the
+/// normalized [0, 1] luminance. Times out (resolves nil) so a stalled
+/// capture device can never freeze recording start.
+final class SceneLuminanceDelegate: NSObject,
+                                    AVCaptureVideoDataOutputSampleBufferDelegate,
+                                    @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Double?, Never>?
+    private var resolved = false
+
+    func firstLuminance(timeoutSeconds: TimeInterval) async -> Double? {
+        await withCheckedContinuation { cont in
+            lock.lock()
+            continuation = cont
+            lock.unlock()
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(
+                deadline: .now() + timeoutSeconds) { [weak self] in
+                self?.resolve(nil)
+            }
+        }
+    }
+
+    nonisolated func captureOutput(_ output: AVCaptureOutput,
+                                   didOutput sampleBuffer: CMSampleBuffer,
+                                   from connection: AVCaptureConnection) {
+        guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let lum = Self.meanLuminance(of: buffer)
+        resolve(lum)
+    }
+
+    private func resolve(_ value: Double?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !resolved else { return }
+        resolved = true
+        continuation?.resume(returning: value)
+        continuation = nil
+    }
+
+    /// Averages the Y plane of a 420 YpCbCr buffer, subsampled 8× in
+    /// each axis. ~32 k samples per frame is enough for a stable mean.
+    private static func meanLuminance(of buffer: CVPixelBuffer) -> Double {
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard CVPixelBufferGetPlaneCount(buffer) > 0,
+              let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else {
+            return 0.5
+        }
+        let width = CVPixelBufferGetWidthOfPlane(buffer, 0)
+        let height = CVPixelBufferGetHeightOfPlane(buffer, 0)
+        let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        let ptr = base.assumingMemoryBound(to: UInt8.self)
+        var sum: UInt64 = 0
+        var count: Int = 0
+        for y in stride(from: 0, to: height, by: 8) {
+            let row = ptr.advanced(by: y * bytesPerRow)
+            for x in stride(from: 0, to: width, by: 8) {
+                sum &+= UInt64(row[x])
+                count += 1
+            }
+        }
+        guard count > 0 else { return 0.5 }
+        return Double(sum) / Double(count) / 255.0
     }
 }

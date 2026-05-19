@@ -244,6 +244,7 @@ enum EnumKey: String {
     case deviceModel = "device_model"
     case iosMajorVersion = "ios_major_version"
     case reelLength = "reel_length"
+    case sceneType = "scene_type"
 }
 
 enum DailyEventKey: String {

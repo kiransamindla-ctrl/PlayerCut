@@ -67,6 +67,9 @@ actor PipelineOrchestrator {
                     await DiagnosticsStore.shared.recordEnum(
                         .reelLength,
                         value: game.reelLengthOverride ?? player.reelLengthPreference)
+                    await DiagnosticsStore.shared.recordEnum(
+                        .sceneType,
+                        value: game.sceneType)
 
                     // Stage 1
                     continuation.yield(.stage1Started)
