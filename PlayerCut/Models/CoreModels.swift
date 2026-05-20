@@ -250,14 +250,23 @@ struct GameSession: Codable, Identifiable {
     var audioLoudnessURL: URL
     var stage1Result: Stage1Result?
     var stage2Result: Stage2Result?
+    /// Canonical local copy of the finished reel. Documents/reels/<id>.mp4
+    /// — always set after a successful compose, regardless of whether
+    /// Photos access was granted. This is the playback source for
+    /// GameDetailView and the share-sheet item; never replaced by a
+    /// PHAsset fetch (which can't read under add-only).
+    var localReelURL: URL?
+    /// True when a *copy* of the reel was successfully added to the
+    /// user's Photos library (Recents at minimum, optionally also the
+    /// PlayerCut album under full access).
+    var savedToPhotos: Bool = false
     /// PHAsset.localIdentifier of the reel saved into the user's Photos
-    /// library. nil before the reel is saved, or if Photos access was
-    /// denied (in which case `localReelFallbackURL` holds the file
-    /// locally until the user retries).
+    /// library. Set only when we ran under full-access AND were able
+    /// to read it back. Under add-only / limited this stays nil — the
+    /// reel still lives in Photos Recents and on the local sandbox.
     var exportedReelAssetId: String?
-    /// Set only when Photos save failed (typically permission denied).
-    /// File lives in the durable game directory so it survives across
-    /// launches and can be re-uploaded via the GameDetailView retry path.
+    /// Retained for back-compat decode of pre-canonical-local games.
+    /// New code should use `localReelURL` instead.
     var localReelFallbackURL: URL?
     var status: GameStatus = .recording
     var triggerSource: TriggerSource = .manual
@@ -280,6 +289,8 @@ struct GameSession: Codable, Identifiable {
          audioLoudnessURL: URL,
          stage1Result: Stage1Result?,
          stage2Result: Stage2Result?,
+         localReelURL: URL? = nil,
+         savedToPhotos: Bool = false,
          exportedReelAssetId: String? = nil,
          localReelFallbackURL: URL? = nil,
          status: GameStatus = .recording,
@@ -297,6 +308,8 @@ struct GameSession: Codable, Identifiable {
         self.audioLoudnessURL = audioLoudnessURL
         self.stage1Result = stage1Result
         self.stage2Result = stage2Result
+        self.localReelURL = localReelURL
+        self.savedToPhotos = savedToPhotos
         self.exportedReelAssetId = exportedReelAssetId
         self.localReelFallbackURL = localReelFallbackURL
         self.status = status
@@ -321,6 +334,8 @@ struct GameSession: Codable, Identifiable {
         audioLoudnessURL = try c.decode(URL.self, forKey: .audioLoudnessURL)
         stage1Result = try c.decodeIfPresent(Stage1Result.self, forKey: .stage1Result)
         stage2Result = try c.decodeIfPresent(Stage2Result.self, forKey: .stage2Result)
+        localReelURL = try c.decodeIfPresent(URL.self, forKey: .localReelURL)
+        savedToPhotos = try c.decodeIfPresent(Bool.self, forKey: .savedToPhotos) ?? false
         exportedReelAssetId = try c.decodeIfPresent(String.self, forKey: .exportedReelAssetId)
         localReelFallbackURL = try c.decodeIfPresent(URL.self, forKey: .localReelFallbackURL)
         status = try c.decodeIfPresent(GameStatus.self, forKey: .status) ?? .recording

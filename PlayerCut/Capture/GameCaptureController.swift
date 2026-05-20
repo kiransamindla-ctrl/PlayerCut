@@ -44,6 +44,23 @@ final class GameCaptureController: NSObject {
     // MARK: - Setup
 
     func configure() throws {
+        // B3: pin the audio session to .playAndRecord for the duration
+        // of the capture session. The default .ambient category would
+        // be deactivated by AVCapture and re-activated on each output,
+        // which causes glitchy loudness samples in the first second.
+        do {
+            let audio = AVAudioSession.sharedInstance()
+            try audio.setCategory(.playAndRecord,
+                                  mode: .videoRecording,
+                                  options: [.mixWithOthers,
+                                            .defaultToSpeaker,
+                                            .allowBluetooth])
+            try audio.setActive(true,
+                                options: .notifyOthersOnDeactivation)
+        } catch {
+            log.warning("AVAudioSession config failed: \(error.localizedDescription)")
+        }
+
         session.beginConfiguration()
         session.sessionPreset = .hd1920x1080
 

@@ -25,16 +25,18 @@ final class ReelComposer {
         aspect.renderSize(forLength: length)
     }
 
-    /// Outcome of a compose+save run. Returned by `compose` so the
-    /// orchestrator can decide whether it's safe to delete the raw video.
+    /// Outcome of a compose+save run. The local file URL is the
+    /// canonical playback source and is always set on success;
+    /// `assetId` and `savedToPhotos` are nice-to-have signals about
+    /// what made it into the user's Photos library.
     struct Result {
-        /// PHAsset localIdentifier when the reel was saved into Photos.
+        /// Always set on success. Durable path in Documents/reels/.
+        let localURL: URL
+        /// True when a copy landed in Photos (Recents at minimum).
+        let savedToPhotos: Bool
+        /// PHAsset id when full access let us read it back; nil under
+        /// add-only or when Photos was denied.
         let assetId: String?
-        /// File URL when the reel could not be saved (e.g., Photos access
-        /// denied). Lives in the durable game directory so the user can
-        /// retry from GameDetailView.
-        let fallbackURL: URL?
-        var savedToPhotos: Bool { assetId != nil }
     }
 
     func compose(plan: ReelPlan,
@@ -149,28 +151,18 @@ final class ReelComposer {
             throw PipelineError.compositionFailed("Export ended in unexpected state")
         }
 
-        // Attempt to save into the user's Photos library. If the user
-        // denies access, move the reel into the durable fallback path so
-        // they can retry later — the raw video stays in tmp until the
-        // reel is safely landed somewhere.
-        let saveResult = await PhotosLibraryService.saveReel(fileURL: outputURL)
-        switch saveResult {
-        case .saved(let id):
-            // Photos owns the bytes now; we can let the tmp output go.
-            try? FileManager.default.removeItem(at: outputURL)
-            return Result(assetId: id, fallbackURL: nil)
-        case .permissionDenied:
-            let fallback = StoragePaths.fallbackReelURL(for: game.id)
-            try? FileManager.default.createDirectory(
-                at: fallback.deletingLastPathComponent(),
-                withIntermediateDirectories: true)
-            try? FileManager.default.removeItem(at: fallback)
-            do {
-                try FileManager.default.moveItem(at: outputURL, to: fallback)
-            } catch {
-                log.error("Couldn't move reel to fallback: \(error.localizedDescription)")
-            }
-            return Result(assetId: nil, fallbackURL: fallback)
+        // The local file at `outputURL` is the canonical playback
+        // source from here on. The orchestrator places it directly in
+        // Documents/reels/<id>.mp4 so we don't need to relocate.
+        // Attempt a best-effort Photos copy; non-fatal on denial.
+        let outcome = await PhotosLibraryService.saveReel(fileURL: outputURL)
+        switch outcome {
+        case .savedToAlbumAndRecents(let id):
+            return Result(localURL: outputURL, savedToPhotos: true, assetId: id)
+        case .savedToRecents(let id):
+            return Result(localURL: outputURL, savedToPhotos: true, assetId: id)
+        case .permissionDenied, .failed:
+            return Result(localURL: outputURL, savedToPhotos: false, assetId: nil)
         }
     }
 

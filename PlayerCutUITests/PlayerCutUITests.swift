@@ -31,6 +31,7 @@ final class PlayerCutUITests: XCTestCase {
         app.launchArguments += [
             "-playercut.terms_accepted_v1", "YES",
             "-playercut.old_phone_intro_shown", "YES",
+            "-playercut.permissions_primer_done", "YES",
             "-playercut.assisted_tier_shown", "YES"
         ]
         app.launch()

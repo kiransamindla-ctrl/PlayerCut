@@ -64,8 +64,26 @@ enum StoragePaths {
 
     /// Where we keep a reel if Photos access is denied: in the durable
     /// gameDirectory (not tmp) so a retry works after an app relaunch.
+    /// Retained for back-compat with games saved before the
+    /// canonical-local-reel migration.
     static func fallbackReelURL(for id: UUID) -> URL {
         gameDirectory(for: id).appendingPathComponent("reel.mp4")
+    }
+
+    // MARK: - Canonical local reel (Section A1)
+
+    /// Durable directory for finished reels. The sandbox copy is the
+    /// canonical playback source — Photos saves are a *copy*, not the
+    /// source of truth. Under "Add Photos Only" we can't read the
+    /// PHAsset back anyway, so the local file is non-negotiable.
+    static var reelsDirectory: URL {
+        documents.appendingPathComponent("reels")
+    }
+
+    /// Final on-device location of a game's reel.
+    /// Documents/reels/<gameId>.mp4
+    static func localReelURL(for id: UUID) -> URL {
+        reelsDirectory.appendingPathComponent("\(id.uuidString).mp4")
     }
 }
 
@@ -79,8 +97,31 @@ actor GameStore {
     init() {
         try? FileManager.default.createDirectory(at: StoragePaths.gamesRoot,
                                                  withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: StoragePaths.reelsDirectory,
+                                                 withIntermediateDirectories: true)
         loadPlayers()
         loadGames()
+        pruneOldLocalReels()
+    }
+
+    /// Delete sandbox reels older than 30 days IF the user already has
+    /// a copy in their Photos library. The local copy is the playback
+    /// source while it exists, but Photos is the durable home; we
+    /// don't need to keep both forever. // SOURCE: zero-storage policy
+    /// in PlayerCut-MasterProjectMemory + Privacy footer copy.
+    private func pruneOldLocalReels() {
+        let fm = FileManager.default
+        let cutoff = Date().addingTimeInterval(-30 * 24 * 60 * 60)
+        for game in games.values {
+            guard game.savedToPhotos,
+                  let url = game.localReelURL,
+                  fm.fileExists(atPath: url.path),
+                  let attrs = try? fm.attributesOfItem(atPath: url.path),
+                  let modified = attrs[.modificationDate] as? Date,
+                  modified < cutoff else { continue }
+            try? fm.removeItem(at: url)
+            log.info("Pruned reel \(game.id.uuidString) — >30 days old, already in Photos")
+        }
     }
 
     // MARK: - Players

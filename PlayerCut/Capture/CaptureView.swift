@@ -35,6 +35,10 @@ struct CaptureView: View {
     @State private var sessionReelLength: ReelLength
     @State private var showingLengthPicker = false
     @State private var armedPulse = false
+    /// Brightness we observed before dimming; restored on stop so we
+    /// don't leave the user's phone at 10% after capture.
+    @State private var savedBrightness: CGFloat = 1.0
+    @State private var screenDimmed = false
 
     init(player: PlayerEnrollment) {
         self.player = player
@@ -70,6 +74,30 @@ struct CaptureView: View {
                         .background(Color.red.opacity(0.85),
                                     in: RoundedRectangle(cornerRadius: 8))
                         .padding()
+                }
+            }
+
+            // Tap-to-wake overlay: while dimmed, any tap on the preview
+            // restores brightness without stopping the recording so the
+            // user can confirm framing without ending the game.
+            if screenDimmed {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        UIScreen.main.brightness = savedBrightness
+                        screenDimmed = false
+                    }
+                    .accessibilityIdentifier("tap-to-wake")
+                VStack {
+                    Spacer()
+                    Text("Recording — tap to brighten")
+                        .font(.pcCaption.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.5), in: Capsule())
+                        .padding(.bottom, 140)
                 }
             }
         }
@@ -119,6 +147,10 @@ struct CaptureView: View {
         mountTask = nil
         autoStartTask?.cancel()
         autoStartTask = nil
+        // Defensive: if we leave mid-recording (rare — Close already
+        // calls stop) make sure brightness + idle timer aren't left
+        // in capture mode.
+        restorePowerProfile()
     }
 
     // MARK: - Subviews
@@ -332,10 +364,30 @@ struct CaptureView: View {
                 } else {
                     autoStartedAt = nil
                 }
+                applyCapturePowerProfile()
             } catch {
                 errorMessage = "Couldn't start: \(error.localizedDescription)"
                 log.error("startRecording failed: \(error.localizedDescription)")
             }
+        }
+    }
+
+    /// B1 + B2: keep the screen awake on the tripod and dim it so an
+    /// hour-long sideline recording doesn't burn the battery just to
+    /// drive a 600-nit panel nobody is looking at.
+    private func applyCapturePowerProfile() {
+        UIApplication.shared.isIdleTimerDisabled = true
+        savedBrightness = UIScreen.main.brightness
+        UIScreen.main.brightness = 0.1
+        screenDimmed = true
+        Task { await DiagnosticsStore.shared.increment(.idleTimerDisabledDuringCapture) }
+    }
+
+    private func restorePowerProfile() {
+        UIApplication.shared.isIdleTimerDisabled = false
+        if screenDimmed {
+            UIScreen.main.brightness = savedBrightness
+            screenDimmed = false
         }
     }
 
@@ -346,6 +398,7 @@ struct CaptureView: View {
         }
         autoStartedAt = nil
         isRecording = false
+        restorePowerProfile()
         Task {
             do {
                 let game = try await coordinator.captureController.stopRecording()

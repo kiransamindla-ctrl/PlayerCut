@@ -27,9 +27,10 @@ targets:
       path: PlayerCut/Info.plist
       properties:
         CFBundleDisplayName: PlayerCut
-        NSCameraUsageDescription: Record your child's game.
-        NSMicrophoneUsageDescription: Detect crowd reactions for highlight detection.
-        NSPhotoLibraryAddUsageDescription: Save your highlight reels to your Photos library so they live with your other videos.
+        NSCameraUsageDescription: PlayerCut records your game to make a highlight reel of your child.
+        NSMicrophoneUsageDescription: PlayerCut uses the microphone to find the most exciting moments and add game sound to your reel.
+        NSPhotoLibraryAddUsageDescription: PlayerCut saves your finished reel to your Photos. We only add — we never read your library.
+        NSBluetoothAlwaysUsageDescription: PlayerCut uses Bluetooth to detect your child's beacon for instant, reliable identification. We never connect to or read other devices.
         UIBackgroundModes:
           - processing
           - fetch

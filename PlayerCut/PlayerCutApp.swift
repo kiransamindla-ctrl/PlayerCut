@@ -69,6 +69,7 @@ struct RootView: View {
     @State private var presentingAssistedTier = false
     @State private var presentingPaywall = false
     @AppStorage(OnboardingKeys.termsAccepted) private var termsAccepted = false
+    @AppStorage(PermissionPrimerKeys.primerDone) private var permissionsPrimerDone = false
     @AppStorage(AssistedKeys.assistedTierShown) private var assistedTierShown = false
     @AppStorage(PricingKeys.freeReelsUsed) private var freeReelsUsedObserved = 0
 
@@ -137,6 +138,13 @@ struct RootView: View {
             }
             .fullScreenCover(isPresented: .constant(!termsAccepted)) {
                 WelcomeView(onAccepted: { termsAccepted = true })
+            }
+            .fullScreenCover(isPresented: .constant(termsAccepted
+                                                    && !permissionsPrimerDone)) {
+                PermissionsPrimerView {
+                    permissionsPrimerDone = true
+                }
+                .preferredColorScheme(.dark)
             }
             .sheet(isPresented: $presentingPaywall) {
                 PaywallView(

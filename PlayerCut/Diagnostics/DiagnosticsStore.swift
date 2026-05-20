@@ -235,6 +235,15 @@ enum CounterKey: String {
     /// Any divergence between this and reelsCompleted is a regression.
     case reelAlwaysProduced = "reel_always_produced"
 
+    // Reel delivery (Section A)
+    case reelSavedToPhotosRecents     = "reel_saved_to_photos_recents"
+    case reelSavedToPlayerCutAlbum    = "reel_saved_to_playercut_album"
+    case reelKeptLocalOnly            = "reel_kept_local_only"
+    case reelPlayedFromLocal          = "reel_played_from_local"
+
+    // Capture efficiency (Section B)
+    case idleTimerDisabledDuringCapture = "idle_timer_disabled_during_capture"
+
     // Errors (categorized, never with text)
     case errorCaptureFailed = "err_capture_failed"
     case errorPipelineFailed = "err_pipeline_failed"
@@ -256,6 +265,10 @@ enum EnumKey: String {
     case iosMajorVersion = "ios_major_version"
     case reelLength = "reel_length"
     case sceneType = "scene_type"
+    case photoAuthStatusAtSave = "photo_auth_status_at_save"
+    case backgroundRefreshStatus = "background_refresh_status"
+    case bluetoothAuthStatus = "bluetooth_auth_status"
+    case notificationAuthStatus = "notification_auth_status"
 }
 
 enum DailyEventKey: String {

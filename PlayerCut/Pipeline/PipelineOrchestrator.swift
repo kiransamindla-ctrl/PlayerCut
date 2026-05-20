@@ -10,6 +10,9 @@
 import AVFoundation
 import Foundation
 import os.log
+#if canImport(UIKit)
+import UIKit
+#endif
 
 actor PipelineOrchestrator {
 
@@ -59,6 +62,33 @@ actor PipelineOrchestrator {
         AsyncStream { continuation in
             Task {
                 let pipelineStart = Date()
+
+                // B4: take a background-task assertion so a brief
+                // user-initiated app switch doesn't immediately kill
+                // composing. The system grants ~30s minimum on any
+                // device; we end the assertion when the pipeline
+                // finishes (success or failure) or when the system
+                // signals expiration.
+                #if canImport(UIKit)
+                var bgTask: UIBackgroundTaskIdentifier = .invalid
+                bgTask = await UIApplication.shared.beginBackgroundTask(
+                    withName: "playercut.pipeline.\(gameId.uuidString)") {
+                    // Expiration handler — must end the task we got.
+                    Task { @MainActor in
+                        if bgTask != .invalid {
+                            UIApplication.shared.endBackgroundTask(bgTask)
+                            bgTask = .invalid
+                        }
+                    }
+                }
+                defer {
+                    Task { @MainActor in
+                        if bgTask != .invalid {
+                            UIApplication.shared.endBackgroundTask(bgTask)
+                        }
+                    }
+                }
+                #endif
                 do {
                     var game = try await self.store.game(id: gameId)
                     let player = try await self.store.player(id: game.playerId)
@@ -153,10 +183,10 @@ actor PipelineOrchestrator {
                     try await self.store.upsert(game)
                     continuation.yield(.composing)
 
-                    // Reel is composed into a temp file. ReelComposer will
-                    // try to land it in Photos and either return an
-                    // assetId (good) or a fallback file URL (Photos denied).
-                    let outputURL = StoragePaths.tempReelURL(for: game.id)
+                    // Reel renders directly into the canonical local
+                    // path (Documents/reels/<id>.mp4). That file is the
+                    // playback source regardless of Photos permission.
+                    let outputURL = StoragePaths.localReelURL(for: game.id)
                     try? FileManager.default.createDirectory(
                         at: outputURL.deletingLastPathComponent(),
                         withIntermediateDirectories: true)
@@ -171,19 +201,22 @@ actor PipelineOrchestrator {
                     await DiagnosticsStore.shared.recordDuration(
                         .composition,
                         seconds: Date().timeIntervalSince(composeStart))
+                    game.localReelURL = composeResult.localURL
+                    game.savedToPhotos = composeResult.savedToPhotos
                     game.exportedReelAssetId = composeResult.assetId
-                    game.localReelFallbackURL = composeResult.fallbackURL
+                    game.localReelFallbackURL = nil  // legacy field — no longer used
                     game.status = .completed
                     try await self.store.upsert(game)
 
-                    // Zero-video-storage policy: once the reel is in the
-                    // Photos library, delete the raw recording. If we
-                    // only have a local fallback (Photos denied), keep
-                    // raw + audio in place so a retry is possible.
-                    if composeResult.savedToPhotos {
-                        await self.deleteEphemeralVideoFiles(for: game)
-                    } else {
-                        self.log.warning("Reel kept locally; raw video retained pending retry")
+                    // Zero-raw-storage policy: the local *reel* stays
+                    // in Documents/reels/ as the canonical playback
+                    // source. The raw recording is always deleted —
+                    // the reel doesn't need it anymore, and the user
+                    // can re-share from the local copy or Photos.
+                    await self.deleteEphemeralVideoFiles(for: game)
+                    if !composeResult.savedToPhotos {
+                        await DiagnosticsStore.shared.increment(.reelKeptLocalOnly)
+                        self.log.warning("Reel kept local-only (Photos denied or failed)")
                     }
 
                     await DiagnosticsStore.shared.increment(.reelsCompleted)
@@ -203,12 +236,8 @@ actor PipelineOrchestrator {
                         }
                     }
 
-                    // Surface the reel URL the UI can use right now:
-                    // the in-Photos copy lives behind a PHAsset id, so
-                    // we yield the fallback URL or the temp output for
-                    // immediate playback. GameDetailView decides which.
-                    let yieldURL = composeResult.fallbackURL ?? outputURL
-                    continuation.yield(.completed(reelURL: yieldURL))
+                    // The canonical local file is what the UI plays.
+                    continuation.yield(.completed(reelURL: composeResult.localURL))
                 } catch {
                     self.log.error("Pipeline failed: \(error.localizedDescription)")
                     await DiagnosticsStore.shared.increment(.reelsFailed)

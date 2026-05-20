@@ -120,10 +120,15 @@ enum CompilationOrchestrator {
         await DiagnosticsStore.shared.increment(.compilationsCreated)
 
         switch saveResult {
-        case .saved(let id):
+        case .savedToAlbumAndRecents(let id):
             try? FileManager.default.removeItem(at: outputURL)
             return Result(assetId: id, fallbackURL: nil)
-        case .permissionDenied:
+        case .savedToRecents(let id):
+            // Under add-only the album link wasn't possible; the
+            // compilation still landed in the user's library. Keep
+            // the local file as a fallback for in-app playback.
+            return Result(assetId: id, fallbackURL: outputURL)
+        case .permissionDenied, .failed:
             return Result(assetId: nil, fallbackURL: outputURL)
         }
     }

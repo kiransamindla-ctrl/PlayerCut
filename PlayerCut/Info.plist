@@ -25,12 +25,14 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>PlayerCut uses Bluetooth to detect your child's beacon for instant, reliable identification. We never connect to or read other devices.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Record your child's game.</string>
+	<string>PlayerCut records your game to make a highlight reel of your child.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Detect crowd reactions for highlight detection.</string>
+	<string>PlayerCut uses the microphone to find the most exciting moments and add game sound to your reel.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Save your highlight reels to your Photos library so they live with your other videos.</string>
+	<string>PlayerCut saves your finished reel to your Photos. We only add — we never read your library.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>

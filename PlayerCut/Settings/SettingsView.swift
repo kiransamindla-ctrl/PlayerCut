@@ -27,6 +27,7 @@ struct SettingsView: View {
                 Theme.bgDark.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
+                        BackgroundRefreshBanner()
                         sectionHeader("Capture automation")
                         VStack(spacing: 0) {
                             settingsRow {

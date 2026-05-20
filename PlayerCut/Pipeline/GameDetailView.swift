@@ -2,14 +2,19 @@
 //  GameDetailView.swift
 //  PlayerCut/Pipeline
 //
-//  Minimal per-game screen for end-to-end testing. Plays back the reel
-//  from the user's Photos library; otherwise shows the current pipeline
-//  status. If the reel exists only as a local fallback (Photos access was
-//  denied), exposes a Try again button to re-request permission and save.
+//  Plays the canonical local reel from Documents/reels/<id>.mp4 and
+//  shares it via UIActivityViewController. Never reaches into Photos /
+//  PHAsset for playback — under "Add Photos Only" we cannot read the
+//  library, and there's no need to: the sandbox file is the source of
+//  truth.
+//
+//  Crash-proof state machine:
+//   - localReelURL present + file exists  → play it
+//   - pipeline still running               → status + StadiumLightBar
+//   - pipeline done but no local reel      → "Re-process" CTA, never crash
 //
 
 import AVKit
-import Photos
 import SwiftUI
 
 struct GameDetailView: View {
@@ -24,11 +29,6 @@ struct GameDetailView: View {
     @State private var presentingShare = false
     @State private var manualRun: Task<Void, Never>?
     @State private var manualRunLog: String?
-
-    @State private var playerItem: AVPlayerItem?
-    @State private var loadedAssetId: String?
-
-    @State private var retryingPermission = false
 
     var body: some View {
         ZStack {
@@ -62,94 +62,144 @@ struct GameDetailView: View {
 
     @ViewBuilder
     private func completedContent(for game: GameSession) -> some View {
-        if let assetId = game.exportedReelAssetId {
+        // The canonical playback source is the local sandbox file —
+        // never PHAsset. Belt-and-braces: also require the file to
+        // exist on disk before we hand it to AVPlayer.
+        if let local = playableLocalURL(for: game) {
             VStack(spacing: 0) {
-                ZStack {
-                    Color.black
-                    if let item = playerItem {
-                        VideoPlayer(player: AVPlayer(playerItem: item))
-                    } else {
-                        ProgressView("Loading from Photos…")
-                            .tint(Theme.accent)
-                            .task { await loadPlayerItem(assetId: assetId) }
+                VideoPlayer(player: AVPlayer(url: local))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+                    .onAppear {
+                        Task { await DiagnosticsStore.shared.increment(.reelPlayedFromLocal) }
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                HStack(spacing: 12) {
-                    PCPillButton(title: "Share",
-                                 systemImage: "square.and.arrow.up.fill",
-                                 tint: Theme.accent,
-                                 height: 64) {
-                        presentingShare = true
+                VStack(spacing: 8) {
+                    savedLocationLine(for: game)
+                    HStack(spacing: 12) {
+                        PCPillButton(title: "Share",
+                                     systemImage: "square.and.arrow.up.fill",
+                                     tint: Theme.accent,
+                                     height: 60) {
+                            presentingShare = true
+                        }
+                        Button {
+                            Haptic.warning()
+                            // Local-file deletion isn't wired yet; the
+                            // user can delete from Photos directly.
+                            // TODO Delete-LAUNCH: also remove the
+                            // sandbox copy + game record on confirm.
+                        } label: {
+                            Text("DELETE")
+                                .font(.system(size: 14, weight: .bold))
+                                .tracking(1.4)
+                                .foregroundStyle(Theme.textSecondary)
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 18)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    Button {
-                        Haptic.warning()
-                        // Deletion-from-history isn't wired yet (the
-                        // PHAsset belongs to the user and the local
-                        // game record is metadata-only). Future work.
-                    } label: {
-                        Text("DELETE")
-                            .font(.system(size: 14, weight: .bold))
-                            .tracking(1.4)
-                            .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 18)
-                    }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .padding(.vertical, 12)
                 .background(Theme.bgDark)
             }
             .sheet(isPresented: $presentingShare) {
-                if let asset = PhotosLibraryService.fetchAsset(localIdentifier: assetId) {
-                    PHAssetShareSheet(asset: asset)
-                }
+                LocalFileShareSheet(url: local)
             }
-        } else if let fallback = game.localReelFallbackURL {
-            permissionDeniedFallback(for: game, fallback: fallback)
         } else {
-            Text("REEL MISSING")
-                .font(.pcHeading)
-                .foregroundStyle(Theme.textSecondary)
-                .padding()
+            missingReelFallback(for: game)
         }
     }
 
-    @ViewBuilder
-    private func permissionDeniedFallback(for game: GameSession,
-                                          fallback: URL) -> some View {
-        VStack(spacing: 12) {
-            VideoPlayer(player: AVPlayer(url: fallback))
-                .frame(maxWidth: .infinity)
-                .aspectRatio(9.0 / 16.0, contentMode: .fit)
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Allow Photos access to save your reel",
-                      systemImage: "photo.on.rectangle")
-                    .font(.callout.bold())
-                Text("PlayerCut needs permission to add your reel to your Photos library. Until then, it's only on this device.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button {
-                    retrySaveToPhotos(game: game, fallback: fallback)
-                } label: {
-                    if retryingPermission {
-                        ProgressView().tint(.white)
-                    } else {
-                        Text("Try again")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .disabled(retryingPermission)
+    /// Banner under the player that tells the user exactly where the
+    /// reel ended up. Three states per the spec.
+    private func savedLocationLine(for game: GameSession) -> some View {
+        let text: String
+        let icon: String
+        let color: Color
+        if game.savedToPhotos, game.exportedReelAssetId != nil {
+            text = "Saved to Photos → PlayerCut album"
+            icon = "photo.stack.fill"
+            color = Theme.success
+        } else if game.savedToPhotos {
+            text = "Saved to your Photos (Recents)"
+            icon = "photo.fill"
+            color = Theme.success
+        } else {
+            text = "Saved in PlayerCut — tap to allow Photos and save a copy"
+            icon = "exclamationmark.triangle.fill"
+            color = Theme.accent
+        }
+        return Button {
+            if !game.savedToPhotos {
+                openSystemSettings()
             }
-            .padding()
-            .background(Color.orange.opacity(0.15),
-                        in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                Text(text)
+                    .font(.pcCaption)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Theme.bgCard,
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+            .padding(.horizontal, 20)
+        }
+        .buttonStyle(.plain)
+        .disabled(game.savedToPhotos)
+    }
+
+    private func missingReelFallback(for game: GameSession) -> some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 36, weight: .bold))
+                .foregroundStyle(Theme.accent)
+            Text("REEL MISSING")
+                .font(.pcHeading)
+                .tracking(1.3)
+                .foregroundStyle(Theme.textPrimary)
+            Text("The reel file isn't on this device — re-process to make a new one.")
+                .font(.pcCaption)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 30)
+            PCPillButton(title: "Re-process",
+                         systemImage: "arrow.clockwise.circle.fill",
+                         tint: Theme.accent,
+                         height: 56) {
+                runNow(gameID: game.id)
+            }
+            .padding(.horizontal, 30)
+            if let manualRunLog {
+                Text(manualRunLog)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(Theme.textSecondary)
+            }
             Spacer()
         }
+    }
+
+    /// Returns the playable URL only when both the field is set AND
+    /// the file is actually on disk. Guards against orphaned game
+    /// records (e.g. sandbox wiped via Settings → iPhone Storage).
+    private func playableLocalURL(for game: GameSession) -> URL? {
+        guard let url = game.localReelURL else { return nil }
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func openSystemSettings() {
+        #if canImport(UIKit)
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+        #endif
     }
 
     // MARK: - Processing state
@@ -221,24 +271,6 @@ struct GameDetailView: View {
         game = coordinator.games.first { $0.id == gameID }
     }
 
-    private func loadPlayerItem(assetId: String) async {
-        guard loadedAssetId != assetId else { return }
-        loadedAssetId = assetId
-        guard let asset = PhotosLibraryService.fetchAsset(localIdentifier: assetId) else {
-            return
-        }
-        let options = PHVideoRequestOptions()
-        options.isNetworkAccessAllowed = false
-        options.deliveryMode = .highQualityFormat
-        let item: AVPlayerItem? = await withCheckedContinuation { cont in
-            PHImageManager.default().requestPlayerItem(forVideo: asset,
-                                                       options: options) { item, _ in
-                cont.resume(returning: item)
-            }
-        }
-        await MainActor.run { self.playerItem = item }
-    }
-
     private func runNow(gameID: UUID) {
         guard manualRun == nil else { return }
         manualRunLog = "Starting…"
@@ -268,28 +300,19 @@ struct GameDetailView: View {
         case .failed(let e): return "Failed: \(e.localizedDescription)"
         }
     }
+}
 
-    private func retrySaveToPhotos(game: GameSession, fallback: URL) {
-        guard !retryingPermission else { return }
-        retryingPermission = true
-        Task {
-            let result = await PhotosLibraryService.saveReel(fileURL: fallback)
-            switch result {
-            case .saved(let id):
-                var updated = game
-                updated.exportedReelAssetId = id
-                updated.localReelFallbackURL = nil
-                try? await coordinator.store.upsert(updated)
-                try? FileManager.default.removeItem(at: fallback)
-                await coordinator.refresh()
-                self.game = updated
-            case .permissionDenied:
-                // Stay on the fallback path.
-                break
-            }
-            retryingPermission = false
-        }
+// MARK: - Local-file share sheet
+
+struct LocalFileShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url],
+                                 applicationActivities: nil)
     }
+
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Stadium-light progress bar
@@ -327,36 +350,4 @@ struct StadiumLightBar: View {
                        : .default,
                        value: pulse)
     }
-}
-
-// MARK: - Photos-asset share sheet
-
-struct PHAssetShareSheet: UIViewControllerRepresentable {
-    let asset: PHAsset
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        let provider = NSItemProvider()
-        provider.registerFileRepresentation(
-            forTypeIdentifier: "public.movie",
-            fileOptions: [],
-            visibility: .all) { completion in
-                let options = PHVideoRequestOptions()
-                options.isNetworkAccessAllowed = false
-                options.deliveryMode = .highQualityFormat
-                PHImageManager.default().requestAVAsset(forVideo: asset,
-                                                       options: options) { avAsset, _, _ in
-                    if let urlAsset = avAsset as? AVURLAsset {
-                        completion(urlAsset.url, false, nil)
-                    } else {
-                        completion(nil, false,
-                                   NSError(domain: "PHAssetShareSheet", code: 1))
-                    }
-                }
-                return nil
-            }
-        return UIActivityViewController(activityItems: [provider],
-                                        applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }
