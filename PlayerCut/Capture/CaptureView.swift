@@ -19,7 +19,10 @@ struct CaptureView: View {
 
     let player: PlayerEnrollment
 
-    @AppStorage(SettingsKeys.autoStartEnabled) private var autoStartEnabled = true
+    // Mount auto-start is a *secondary* convenience. Default OFF so the
+    // capture screen lands on a live preview + record button with zero
+    // dependency on MountDetector — the spec calls this out explicitly.
+    @AppStorage(SettingsKeys.autoStartEnabled) private var autoStartEnabled = false
 
     @State private var mount = MountDetector()
     @State private var mountState: MountDetector.State = .unknown
@@ -139,12 +142,12 @@ struct CaptureView: View {
     // MARK: - Lifecycle
 
     private func onAppear() {
+        log.info("CaptureView onAppear autoStartEnabled=\(autoStartEnabled)")
         // Permission first: AVCaptureDevice creation silently fails if
         // the user hasn't granted access, surfacing as a useless
         // "PipelineError error 0" on the capture screen. Request both
         // (camera AND mic — capture session needs both) explicitly
-        // before we touch the capture controller. MountDetector is fine
-        // to start either way — CMMotionManager doesn't need permission.
+        // before we touch the capture controller.
         Task { @MainActor in
             let cameraOK = await AVCaptureDevice.requestAccess(for: .video)
             let micOK    = await AVCaptureDevice.requestAccess(for: .audio)
@@ -155,14 +158,43 @@ struct CaptureView: View {
                 return
             }
             configureIfNeeded()
+            schedulePreviewWatchdog()
         }
+        // MountDetector is opt-in. When auto-start is OFF (default) we
+        // never even spin up CMMotionManager — the capture screen is
+        // pure manual record. When ON, mount detection runs ALONGSIDE
+        // the manual button, never replacing it.
         if autoStartEnabled {
+            log.info("auto-start ON → starting MountDetector")
             mount.start()
             mountTask = Task { @MainActor in
                 for await s in mount.states {
                     mountState = s
                     handleMountStateChange(s)
                 }
+            }
+        } else {
+            log.info("auto-start OFF → MountDetector skipped")
+        }
+    }
+
+    /// Three-second watchdog per spec: if the AVCaptureSession isn't
+    /// running by the time the user can reasonably expect a preview,
+    /// force-restart it. The controller logs both branches so we can
+    /// tell whether the recipe-application path stalled the session
+    /// (vs. a permission issue or hardware gripe).
+    private func schedulePreviewWatchdog() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard configured else {
+                log.warning("preview watchdog: configure() never completed")
+                return
+            }
+            if coordinator.captureController.session.isRunning {
+                log.info("preview watchdog: session.isRunning=true ✓")
+            } else {
+                log.error("preview watchdog: session NOT running after 3s — forcing restart")
+                coordinator.captureController.forceRestartIfStalled()
             }
         }
     }
@@ -248,14 +280,18 @@ struct CaptureView: View {
             }
             .padding(.bottom, 12)
         } else if autoStartEnabled {
-            PCStatusChip(title: mountStatusLabel(mountState),
-                         color: mountStatusColor(mountState))
-                .padding(.bottom, 12)
-        } else {
-            PCStatusChip(title: "AUTO-START OFF — TAP RECORD",
-                         color: Theme.bgCard.opacity(0.9))
+            // Quiet hint, not a blocking status chip. The record button
+            // is the primary action even when auto-start is on.
+            Text(mountHintLabel(mountState))
+                .font(.pcCaption)
+                .foregroundStyle(.white.opacity(0.75))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(.black.opacity(0.4), in: Capsule())
                 .padding(.bottom, 12)
         }
+        // Auto-start off: no status chip. The pulsing red record
+        // button below is the only call to action.
     }
 
     private var bottomBar: some View {
@@ -291,21 +327,17 @@ struct CaptureView: View {
         .padding(.bottom, 8)
     }
 
-    private func mountStatusColor(_ s: MountDetector.State) -> Color {
-        switch s {
-        case .unknown, .moving: return Theme.bgCard.opacity(0.9)
-        case .stable:           return Theme.accent
-        case .mounted:          return Theme.success
-        }
-    }
+    // MARK: - Mount detection wiring (auto-start opt-in)
 
-    // MARK: - Mount detection wiring
-
-    private func mountStatusLabel(_ s: MountDetector.State) -> String {
+    /// Quiet, non-blocking hint used only when auto-start is enabled.
+    /// Never says "DETECTING MOUNT" front-and-center — the spec wants
+    /// the record button to be the primary action; mount status is a
+    /// secondary convenience.
+    private func mountHintLabel(_ s: MountDetector.State) -> String {
         switch s {
-        case .unknown, .moving: return "DETECTING MOUNT"
-        case .stable:           return "ALMOST READY"
-        case .mounted:          return "MOUNTED"
+        case .unknown, .moving: return "Auto-start: waiting for mount"
+        case .stable:           return "Auto-start: almost ready"
+        case .mounted:          return "Auto-start: mounted"
         }
     }
 

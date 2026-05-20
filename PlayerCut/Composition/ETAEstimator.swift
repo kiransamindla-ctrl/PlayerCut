@@ -140,7 +140,6 @@ final class ETAEstimator {
         }
 
         let estTotal = (lower + upper) / 2
-        let remainingMid = max(0, estTotal - elapsed)
         let remainingLo = max(0, lower - elapsed)
         let remainingHi = max(0, upper - elapsed)
         let progress = estTotal > 0 ? min(1, max(0, elapsed / estTotal)) : 0
@@ -151,8 +150,6 @@ final class ETAEstimator {
                        progress: progress,
                        isFirstRun: allCold,
                        isOverdue: overdue)
-        // Note: ignoring `remainingMid` — Reading.label uses the mid
-        // of lower/upper for the single-figure path, matching this.
     }
 
     private static func coldStartSeed(stage: Stage, tier: SoCTier) -> Double {

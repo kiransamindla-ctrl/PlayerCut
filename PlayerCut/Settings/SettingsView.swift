@@ -16,7 +16,9 @@ enum SettingsKeys {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage(SettingsKeys.autoStartEnabled) private var autoStartEnabled = true
+    // OFF by default — auto-start is a secondary convenience that
+    // runs alongside (never instead of) the manual record button.
+    @AppStorage(SettingsKeys.autoStartEnabled) private var autoStartEnabled = false
     @AppStorage(SettingsKeys.autoStopEnabled)  private var autoStopEnabled  = true
 
     @State private var presentingDiagnostics = false

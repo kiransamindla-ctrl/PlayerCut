@@ -64,8 +64,27 @@ final class GameCaptureController: NSObject {
     }
 
     // MARK: - Setup
+    //
+    // configure() is split into two phases on purpose:
+    //
+    //   PHASE 1 (must succeed if the camera exists) — audio session,
+    //     video + audio inputs, file + audio-tap outputs, session
+    //     commit, AND session.startRunning(). The preview goes LIVE
+    //     here. This phase only throws if there is literally no usable
+    //     camera; it does not depend on recipe selection.
+    //
+    //   PHASE 2 (best-effort) — apply the adaptive capture recipe
+    //     (activeFormat + locked fps + HDR-off + locked WB). If any
+    //     step fails we log loudly and leave the device on whatever
+    //     default format AVFoundation picked from the session. The
+    //     preview stays live; the user can still tap record.
+    //
+    // The previous code path threw out of Phase 1 if format selection
+    // failed, which left the SwiftUI preview attached to a session
+    // that was configured-but-never-started — black screen, frozen UI.
 
     func configure() throws {
+        log.info("configure() start")
         // B3: pin the audio session to .playAndRecord for the duration
         // of the capture session. The default .ambient category would
         // be deactivated by AVCapture and re-activated on each output,
@@ -79,6 +98,7 @@ final class GameCaptureController: NSObject {
                                             .allowBluetooth])
             try audio.setActive(true,
                                 options: .notifyOthersOnDeactivation)
+            log.info("configure() audio session pinned to playAndRecord")
         } catch {
             log.warning("AVAudioSession config failed: \(error.localizedDescription)")
         }
@@ -87,12 +107,15 @@ final class GameCaptureController: NSObject {
         // report a real level. Cheap to enable; survives backgrounding.
         UIDevice.current.isBatteryMonitoringEnabled = true
 
+        // ─── PHASE 1: inputs + outputs + session start ─────────────
         session.beginConfiguration()
-        // sessionPreset MUST be .inputPriority when we set
-        // device.activeFormat ourselves — otherwise the preset
-        // overrides the format we just picked. The recipe-based path
-        // owns resolution/fps from here on.
+        // sessionPreset .inputPriority lets a later device.activeFormat
+        // assignment take effect; without it the preset wins and the
+        // recipe is silently overridden. If we never set activeFormat
+        // (Phase 2 fails), .inputPriority falls back to the device's
+        // own default format, which still gives a usable preview.
         session.sessionPreset = .inputPriority
+        log.info("configure() sessionPreset=inputPriority, beginConfiguration ok")
 
         // Video input — prefer the ultrawide on A12+ phones because it
         // captures more of the sideline at the same tripod distance.
@@ -103,21 +126,103 @@ final class GameCaptureController: NSObject {
                                                    for: .video,
                                                    position: .back) {
             videoDevice = ultrawide
-            log.info("Capture device: builtInUltraWideCamera")
+            log.info("configure() video device: builtInUltraWideCamera")
         } else if let wide = AVCaptureDevice.default(.builtInWideAngleCamera,
                                                      for: .video,
                                                      position: .back) {
             videoDevice = wide
-            log.info("Capture device: builtInWideAngleCamera (no ultrawide available)")
+            log.info("configure() video device: builtInWideAngleCamera (no ultrawide)")
         } else {
+            session.commitConfiguration()
             throw PipelineError.captureFailed("No back camera available")
         }
 
-        // ----- Adaptive capture recipe -----
-        // Pick a recipe from the SoC tier + live thermal/battery state,
-        // then resolve it to a concrete activeFormat on this device.
-        // Step-downs (no HEVC at the requested rate → drop fps; no
-        // 4K → drop to 1080p) all happen inside resolveFormat.
+        let videoInput = try AVCaptureDeviceInput(device: videoDevice)
+        guard session.canAddInput(videoInput) else {
+            session.commitConfiguration()
+            throw PipelineError.captureFailed("Cannot add video input")
+        }
+        session.addInput(videoInput)
+        log.info("configure() video input added")
+
+        // Audio input
+        guard let audioDevice = AVCaptureDevice.default(for: .audio) else {
+            session.commitConfiguration()
+            throw PipelineError.captureFailed("No audio device")
+        }
+        let audioInput = try AVCaptureDeviceInput(device: audioDevice)
+        guard session.canAddInput(audioInput) else {
+            session.commitConfiguration()
+            throw PipelineError.captureFailed("Cannot add audio input")
+        }
+        session.addInput(audioInput)
+        log.info("configure() audio input added")
+
+        // Movie file output. Codec is HEVC by default; Phase 2 may
+        // downgrade to H.264 if the recipe resolved that way.
+        guard session.canAddOutput(videoOutput) else {
+            session.commitConfiguration()
+            throw PipelineError.captureFailed("Cannot add movie file output")
+        }
+        session.addOutput(videoOutput)
+        if let connection = videoOutput.connection(with: .video) {
+            let chosenCodec: AVVideoCodecType =
+                videoOutput.availableVideoCodecTypes.contains(.hevc)
+                ? .hevc : .h264
+            videoOutput.setOutputSettings(
+                [AVVideoCodecKey: chosenCodec], for: connection)
+            connection.preferredVideoStabilizationMode = .standard
+        }
+        log.info("configure() movie output added")
+
+        // Audio data tap for loudness
+        audioDataOutput.setSampleBufferDelegate(self, queue: audioQueue)
+        guard session.canAddOutput(audioDataOutput) else {
+            session.commitConfiguration()
+            throw PipelineError.captureFailed("Cannot add audio data output")
+        }
+        session.addOutput(audioDataOutput)
+        log.info("configure() audio tap added")
+
+        session.commitConfiguration()
+        log.info("configure() commitConfiguration done")
+
+        self.videoDevice = videoDevice
+
+        // Start the session ON A BACKGROUND QUEUE per Apple's
+        // recommendation. startRunning() blocks until the AV pipeline
+        // is up; doing it from main can pause the SwiftUI render that's
+        // about to attach the preview layer.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            self.session.startRunning()
+            Logger(subsystem: "com.playercut.app", category: "Capture")
+                .info("configure() session.startRunning() returned, isRunning=\(self.session.isRunning)")
+        }
+
+        observeThermalAndBattery()
+
+        // ─── PHASE 2: best-effort recipe application ───────────────
+        // Off-main on the same queue so it runs after startRunning has
+        // settled. Any failure logs loudly and leaves the device on
+        // its default format — preview stays live regardless.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
+                self?.applyRecipeBestEffort(on: videoDevice)
+            }
+        }
+
+        log.info("configure() returning — preview should go live shortly")
+    }
+
+    /// Best-effort recipe application. Picks the ideal recipe for the
+    /// current SoC tier + thermal/battery state, asks DeviceCapabilities
+    /// to step it down to a supported AVCaptureDevice.Format, and
+    /// applies it. On any failure it logs the reason and leaves the
+    /// device on its existing (default) format. The session is already
+    /// running when we get here, so the preview never goes dark.
+    private func applyRecipeBestEffort(on device: AVCaptureDevice) {
         socTier = DeviceCapabilities.currentTier()
         let battery = UIDevice.current.batteryLevel
         let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -126,74 +231,62 @@ final class GameCaptureController: NSObject {
             thermal: ProcessInfo.processInfo.thermalState,
             batteryLevel: battery,
             lowPower: lowPower)
+        log.info("recipe: ideal=\(initialRecipe.resolution.rawValue)@\(initialRecipe.fps), tier=\(self.socTier.rawValue, privacy: .public)")
+
         let (resolvedFormat, resolvedRecipe) =
-            DeviceCapabilities.resolveFormat(initialRecipe, on: videoDevice)
+            DeviceCapabilities.resolveFormat(initialRecipe, on: device)
         guard let format = resolvedFormat else {
-            throw PipelineError.captureFailed(
-                "No AVCaptureDevice.Format satisfies any recipe step-down")
+            log.warning("recipe: no AVCaptureDevice.Format satisfies any step-down — staying on device default")
+            return
         }
-        try applyRecipe(resolvedRecipe,
-                        format: format,
-                        to: videoDevice,
-                        scene: .outdoor)
-        self.currentRecipe = resolvedRecipe
-        self.videoDevice = videoDevice
-        log.info("Recipe: tier=\(self.socTier.rawValue) → \(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps) \(resolvedRecipe.codec.rawValue, privacy: .public) stab=\(resolvedRecipe.stabilization.rawValue, privacy: .public)")
-        Task.detached { [tier = socTier, recipe = resolvedRecipe] in
-            await DiagnosticsStore.shared.recordEnum(.captureSoCTier, value: tier)
-            await DiagnosticsStore.shared.recordEnum(
-                .captureRecipeResolution, value: recipe.resolution)
-        }
-
-        let videoInput = try AVCaptureDeviceInput(device: videoDevice)
-        guard session.canAddInput(videoInput) else {
-            throw PipelineError.captureFailed("Cannot add video input")
-        }
-        session.addInput(videoInput)
-
-        // Audio input
-        guard let audioDevice = AVCaptureDevice.default(for: .audio) else {
-            throw PipelineError.captureFailed("No audio device")
-        }
-        let audioInput = try AVCaptureDeviceInput(device: audioDevice)
-        guard session.canAddInput(audioInput) else {
-            throw PipelineError.captureFailed("Cannot add audio input")
-        }
-        session.addInput(audioInput)
-
-        // Movie file output. The codec selection is gated by the
-        // recipe — when we resolved to .h264 (HEVC unavailable on this
-        // format) we honor that explicitly.
-        guard session.canAddOutput(videoOutput) else {
-            throw PipelineError.captureFailed("Cannot add movie file output")
-        }
-        session.addOutput(videoOutput)
-        if let connection = videoOutput.connection(with: .video) {
-            let chosenCodec: AVVideoCodecType
-            if resolvedRecipe.codec == .hevc,
-               videoOutput.availableVideoCodecTypes.contains(.hevc) {
-                chosenCodec = .hevc
-            } else {
-                chosenCodec = .h264
+        do {
+            session.beginConfiguration()
+            defer { session.commitConfiguration() }
+            try applyRecipe(resolvedRecipe,
+                            format: format,
+                            to: device,
+                            scene: .outdoor)
+            self.currentRecipe = resolvedRecipe
+            // Re-pin codec / stabilization on the connection now that
+            // the device may have switched format.
+            if let connection = videoOutput.connection(with: .video) {
+                let chosenCodec: AVVideoCodecType =
+                    (resolvedRecipe.codec == .hevc
+                     && videoOutput.availableVideoCodecTypes.contains(.hevc))
+                    ? .hevc : .h264
+                videoOutput.setOutputSettings(
+                    [AVVideoCodecKey: chosenCodec], for: connection)
+                connection.preferredVideoStabilizationMode =
+                    stabilizationMode(for: resolvedRecipe.stabilization,
+                                      on: connection)
             }
-            videoOutput.setOutputSettings(
-                [AVVideoCodecKey: chosenCodec], for: connection)
-            connection.preferredVideoStabilizationMode =
-                stabilizationMode(for: resolvedRecipe.stabilization,
-                                  on: connection)
+            log.info("recipe APPLIED: \(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps) \(resolvedRecipe.codec.rawValue, privacy: .public) stab=\(resolvedRecipe.stabilization.rawValue, privacy: .public)")
+            Task.detached { [tier = socTier, recipe = resolvedRecipe] in
+                await DiagnosticsStore.shared.recordEnum(
+                    .captureSoCTier, value: tier)
+                await DiagnosticsStore.shared.recordEnum(
+                    .captureRecipeResolution, value: recipe.resolution)
+            }
+        } catch {
+            log.error("recipe apply FAILED: \(error.localizedDescription) — staying on device default; preview unaffected")
         }
+    }
 
-        // Audio data tap for loudness
-        audioDataOutput.setSampleBufferDelegate(self, queue: audioQueue)
-        guard session.canAddOutput(audioDataOutput) else {
-            throw PipelineError.captureFailed("Cannot add audio data output")
+    /// External watchdog hook: if the preview hasn't gone live within
+    /// the UI's grace period, force-start the session again and log.
+    /// Safe to call from any thread; no-ops if already running.
+    func forceRestartIfStalled() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            if self.session.isRunning {
+                Logger(subsystem: "com.playercut.app", category: "Capture")
+                    .info("watchdog: session already running, no-op")
+                return
+            }
+            Logger(subsystem: "com.playercut.app", category: "Capture")
+                .error("watchdog: session NOT running after grace period — force-starting")
+            self.session.startRunning()
         }
-        session.addOutput(audioDataOutput)
-
-        session.commitConfiguration()
-        log.info("Capture session configured")
-
-        observeThermalAndBattery()
     }
 
     // MARK: - Recipe application
