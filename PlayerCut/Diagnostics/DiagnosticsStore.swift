@@ -207,6 +207,22 @@ enum CounterKey: String {
     // Capture
     case gamesRecorded = "games_recorded"
     case captureInterruptions = "capture_interruptions"
+    /// Live downgrade from 4K → 1080p (or 60→30) driven by
+    /// ProcessInfo.thermalState transitioning to .serious / .critical.
+    case captureDowngradeThermal = "capture_downgrade_thermal"
+    /// Live downgrade triggered by UIDevice.current.batteryLevel
+    /// crossing 20 % or 10 %.
+    case captureDowngradeBattery = "capture_downgrade_battery"
+
+    // Cinematic composer (Section 2 diagnostics)
+    /// Incremented every time a composer stage fails (so the count
+    /// matches stage-level os_log lines). Specific stage carried in
+    /// the EnumKey.composerFailedStage distribution.
+    case composerStageFailed = "composer_stage_failed"
+    /// Set true whenever we fell back to a primitive concatenation.
+    /// The regression test fails if this is ever true on the fixture
+    /// happy path.
+    case composerUsedFallback = "composer_used_fallback"
 
     // Identification
     case stage2NoIdentification = "stage2_no_identification"
@@ -277,6 +293,13 @@ enum EnumKey: String {
     case backgroundRefreshStatus = "background_refresh_status"
     case bluetoothAuthStatus = "bluetooth_auth_status"
     case notificationAuthStatus = "notification_auth_status"
+    /// SoC tier resolved by DeviceCapabilities at capture start.
+    case captureSoCTier = "capture_soc_tier"
+    /// Recipe resolution the capture session actually settled on.
+    case captureRecipeResolution = "capture_recipe_resolution"
+    /// Which composer stage threw (plan / reframe / transition /
+    /// grade / export). Used alongside CounterKey.composerStageFailed.
+    case composerFailedStage = "composer_failed_stage"
 }
 
 enum DailyEventKey: String {

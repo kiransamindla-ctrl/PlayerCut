@@ -55,6 +55,7 @@
 		C64DC90B62B7DE166E378DFE /* CompositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F4A4B71D8E971A80AF66723 /* CompositionTests.swift */; };
 		C9884D22FDD42935BA622E96 /* EvaluationHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = B99F55F63E923EEF3B3AC8B4 /* EvaluationHarness.swift */; };
 		D22548D9D37ACB6C5E6F1323 /* EnrollmentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D749DFAEDD43402C90FC8DCD /* EnrollmentViewModel.swift */; };
+		D2DB86DF3625A5D8226838F3 /* DeviceCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF92EE722574193DFC45FD7 /* DeviceCapabilities.swift */; };
 		DB19202F0F7C740BCF51A698 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D00ECD5C55F39FB0B691F9 /* DiagnosticsView.swift */; };
 		EFBC32E70A4BB555DFE6A0DA /* EditPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B433A8F90D06B46CD63FC521 /* EditPlan.swift */; };
 		F9987A9CD6E4B62E403FF3D9 /* PermissionsPrimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E4E0BCE84AA1C371A675620 /* PermissionsPrimerView.swift */; };
@@ -95,6 +96,7 @@
 		46CCE07A6E2B577DADAF5544 /* LUTFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUTFactory.swift; sourceTree = "<group>"; };
 		48412ECA01A56EBE2AB0F81D /* BeaconScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeaconScanner.swift; sourceTree = "<group>"; };
 		4860CE2164ADF75EB19A533A /* Stage2PlayerLocalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stage2PlayerLocalizer.swift; sourceTree = "<group>"; };
+		5EF92EE722574193DFC45FD7 /* DeviceCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCapabilities.swift; sourceTree = "<group>"; };
 		5F4A4B71D8E971A80AF66723 /* CompositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompositionTests.swift; sourceTree = "<group>"; };
 		608D09E55BF686A8910AF245 /* EnrollmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentViews.swift; sourceTree = "<group>"; };
 		66D00ECD5C55F39FB0B691F9 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
@@ -375,6 +377,7 @@
 			children = (
 				1E8ADD22EC18B0C3766FC8A6 /* BrightnessKeeper.swift */,
 				B24D4CA15A14D5F147D77A85 /* CaptureView.swift */,
+				5EF92EE722574193DFC45FD7 /* DeviceCapabilities.swift */,
 				6EFEA6919A4C1A6B3FA4E4E0 /* GameCaptureController.swift */,
 				15E5B7E9DE36AFADB13EEA06 /* MountDetector.swift */,
 			);
@@ -548,6 +551,7 @@
 				4E829B668CF908CA7303BCF1 /* CompilationOrchestrator.swift in Sources */,
 				7C08D25A7F609A69A3D0A049 /* CompilationView.swift in Sources */,
 				47564E71FFC18A092E06FD93 /* CoreModels.swift in Sources */,
+				D2DB86DF3625A5D8226838F3 /* DeviceCapabilities.swift in Sources */,
 				3B116C589A57AA4058008133 /* DeviceClass.swift in Sources */,
 				2BEDCCAC18BE9C3410B7C192 /* DiagnosticsStore.swift in Sources */,
 				DB19202F0F7C740BCF51A698 /* DiagnosticsView.swift in Sources */,

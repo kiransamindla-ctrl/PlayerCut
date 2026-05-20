@@ -7,6 +7,207 @@ final class PlayerCutTests: XCTestCase {
     }
 }
 
+// MARK: - DeviceCapabilities (Section 1 adaptive capture)
+
+final class DeviceCapabilitiesTests: XCTestCase {
+
+    // ----- Tier mapping from utsname machine string -----
+
+    func testTierMappingA13Family() {
+        for id in ["iPhone12,1", "iPhone12,3", "iPhone12,5", "iPhone12,8"] {
+            XCTAssertEqual(DeviceCapabilities.tier(forMachineIdentifier: id),
+                           .a13, "Expected \(id) to map to A13")
+        }
+    }
+
+    func testTierMappingA14Family() {
+        for id in ["iPhone13,1", "iPhone13,2", "iPhone13,3", "iPhone13,4"] {
+            XCTAssertEqual(DeviceCapabilities.tier(forMachineIdentifier: id),
+                           .a14, "Expected \(id) to map to A14")
+        }
+    }
+
+    func testTierMappingA15Family() {
+        // iPhone 13/14 + SE 3rd gen (iPhone14,6 has A15).
+        let ids = ["iPhone14,2", "iPhone14,3", "iPhone14,4", "iPhone14,5",
+                   "iPhone14,6", "iPhone14,7", "iPhone14,8"]
+        for id in ids {
+            XCTAssertEqual(DeviceCapabilities.tier(forMachineIdentifier: id),
+                           .a15, "Expected \(id) to map to A15")
+        }
+    }
+
+    func testTierMappingA16Family() {
+        for id in ["iPhone15,2", "iPhone15,3", "iPhone15,4", "iPhone15,5"] {
+            XCTAssertEqual(DeviceCapabilities.tier(forMachineIdentifier: id),
+                           .a16, "Expected \(id) to map to A16")
+        }
+    }
+
+    func testTierMappingA17() {
+        for id in ["iPhone16,1", "iPhone16,2"] {
+            XCTAssertEqual(DeviceCapabilities.tier(forMachineIdentifier: id),
+                           .a17, "Expected \(id) to map to A17")
+        }
+    }
+
+    func testTierMappingA18Plus() {
+        // iPhone 16 family (A18 / A18 Pro) and any future iPhone17,*
+        for id in ["iPhone17,1", "iPhone17,3", "iPhone18,1"] {
+            XCTAssertEqual(DeviceCapabilities.tier(forMachineIdentifier: id),
+                           .a18plus, "Expected \(id) to map to A18+")
+        }
+    }
+
+    func testTierMappingUnknownIdentifier() {
+        // Simulator + pre-release identifiers.
+        XCTAssertEqual(DeviceCapabilities.tier(forMachineIdentifier: "x86_64"),
+                       .unknown)
+        XCTAssertEqual(DeviceCapabilities.tier(forMachineIdentifier: "arm64"),
+                       .unknown)
+        // Unknown collapses to A17 for recipe purposes.
+        XCTAssertEqual(DeviceCapabilities.effectiveTier(.unknown), .a17)
+    }
+
+    // ----- Ideal recipe per tier -----
+
+    func testIdealRecipeA13() {
+        let r = DeviceCapabilities.idealRecipe(for: .a13)
+        XCTAssertEqual(r.resolution, .fhd1080)
+        XCTAssertEqual(r.fps, 60)
+        XCTAssertEqual(r.codec, .hevc)
+    }
+
+    func testIdealRecipeMidTierIs4K60() {
+        for tier: SoCTier in [.a14, .a15, .a16] {
+            let r = DeviceCapabilities.idealRecipe(for: tier)
+            XCTAssertEqual(r.resolution, .uhd4k, "tier \(tier)")
+            XCTAssertEqual(r.fps, 60, "tier \(tier)")
+            XCTAssertEqual(r.codec, .hevc, "tier \(tier)")
+            XCTAssertEqual(r.stabilization, .standard, "tier \(tier)")
+        }
+    }
+
+    func testIdealRecipeA17PlusGetsCinematicStabilization() {
+        for tier: SoCTier in [.a17, .a18plus] {
+            let r = DeviceCapabilities.idealRecipe(for: tier)
+            XCTAssertEqual(r.resolution, .uhd4k)
+            XCTAssertEqual(r.fps, 60)
+            XCTAssertEqual(r.stabilization, .cinematic)
+        }
+    }
+
+    func testRealSlowMoSourceMatchesFPS() {
+        XCTAssertTrue(DeviceCapabilities.idealRecipe(for: .a15).providesRealSlowMoSource)
+        let degraded = CaptureRecipe(resolution: .fhd1080, fps: 30)
+        XCTAssertFalse(degraded.providesRealSlowMoSource)
+    }
+
+    // ----- Thermal + battery ladder -----
+
+    private func ideal4K60() -> CaptureRecipe {
+        CaptureRecipe(resolution: .uhd4k, fps: 60,
+                      codec: .hevc, stabilization: .standard)
+    }
+
+    func testDowngradeNominalNoChange() {
+        let base = ideal4K60()
+        let out = DeviceCapabilities.downgrade(base,
+                                               for: .nominal,
+                                               batteryLevel: 0.95,
+                                               lowPower: false)
+        XCTAssertEqual(out, base)
+    }
+
+    func testDowngradeSeriousDropsTo1080p60() {
+        let out = DeviceCapabilities.downgrade(ideal4K60(),
+                                               for: .serious,
+                                               batteryLevel: 0.95,
+                                               lowPower: false)
+        XCTAssertEqual(out.resolution, .fhd1080)
+        XCTAssertEqual(out.fps, 60, "Serious keeps fps")
+    }
+
+    func testDowngradeBatteryUnder20DropsTo1080p60() {
+        let out = DeviceCapabilities.downgrade(ideal4K60(),
+                                               for: .nominal,
+                                               batteryLevel: 0.15,
+                                               lowPower: false)
+        XCTAssertEqual(out.resolution, .fhd1080)
+        XCTAssertEqual(out.fps, 60)
+    }
+
+    func testDowngradeCriticalDropsTo1080p30Standard() {
+        let cinematic = CaptureRecipe(resolution: .uhd4k, fps: 60,
+                                      codec: .hevc, stabilization: .cinematic)
+        let out = DeviceCapabilities.downgrade(cinematic,
+                                               for: .critical,
+                                               batteryLevel: 0.95,
+                                               lowPower: false)
+        XCTAssertEqual(out.resolution, .fhd1080)
+        XCTAssertEqual(out.fps, 30)
+        XCTAssertEqual(out.stabilization, .standard)
+    }
+
+    func testDowngradeBatteryUnder10DropsTo1080p30() {
+        let out = DeviceCapabilities.downgrade(ideal4K60(),
+                                               for: .nominal,
+                                               batteryLevel: 0.05,
+                                               lowPower: false)
+        XCTAssertEqual(out.resolution, .fhd1080)
+        XCTAssertEqual(out.fps, 30)
+    }
+
+    func testDowngradeIgnoresUnknownBatteryLevel() {
+        // batteryLevel == -1 → monitoring not enabled; treat as fine.
+        let out = DeviceCapabilities.downgrade(ideal4K60(),
+                                               for: .nominal,
+                                               batteryLevel: -1,
+                                               lowPower: false)
+        XCTAssertEqual(out, ideal4K60())
+    }
+
+    func testDowngradeLowPowerCountsAsSerious() {
+        let out = DeviceCapabilities.downgrade(ideal4K60(),
+                                               for: .nominal,
+                                               batteryLevel: 0.95,
+                                               lowPower: true)
+        XCTAssertEqual(out.resolution, .fhd1080)
+        XCTAssertEqual(out.fps, 60)
+    }
+
+    // ----- Recipe codec/coding round-trip -----
+
+    func testCaptureRecipeRoundTripsThroughJSON() throws {
+        let original = CaptureRecipe(resolution: .uhd4k, fps: 60,
+                                     codec: .hevc, stabilization: .cinematic)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(CaptureRecipe.self, from: data)
+        XCTAssertEqual(decoded, original)
+    }
+
+    // ----- Live recipe collapses tier + state -----
+
+    func testLiveRecipeRespectsThermalEvenOnTopTier() {
+        let r = DeviceCapabilities.liveRecipe(for: .a18plus,
+                                              thermal: .critical,
+                                              batteryLevel: 0.95,
+                                              lowPower: false)
+        XCTAssertEqual(r.resolution, .fhd1080)
+        XCTAssertEqual(r.fps, 30)
+    }
+
+    func testLiveRecipeNominalA17Gets4K60Cinematic() {
+        let r = DeviceCapabilities.liveRecipe(for: .a17,
+                                              thermal: .nominal,
+                                              batteryLevel: 0.95,
+                                              lowPower: false)
+        XCTAssertEqual(r.resolution, .uhd4k)
+        XCTAssertEqual(r.fps, 60)
+        XCTAssertEqual(r.stabilization, .cinematic)
+    }
+}
+
 // MARK: - Levenshtein
 
 final class LevenshteinTests: XCTestCase {

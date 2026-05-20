@@ -283,6 +283,12 @@ struct GameSession: Codable, Identifiable {
     /// Which ranker tier produced this game's reel. nil until the
     /// pipeline reaches the ranker.
     var rankerTierUsed: RankerTier?
+    /// Recipe actually applied at capture start. Composer reads this
+    /// to know the source resolution (reframe headroom) and the source
+    /// fps (real 0.5x slow-mo vs. frame-blended). nil for games
+    /// recorded before the adaptive-capture migration — composer
+    /// treats nil as "assume 1080p30, no real slow-mo".
+    var captureRecipe: CaptureRecipe?
 
     init(id: UUID,
          playerId: UUID,
@@ -302,7 +308,8 @@ struct GameSession: Codable, Identifiable {
          reelLengthOverride: ReelLength? = nil,
          sceneType: SceneType = .outdoor,
          outputAspectOverride: OutputAspect? = nil,
-         rankerTierUsed: RankerTier? = nil) {
+         rankerTierUsed: RankerTier? = nil,
+         captureRecipe: CaptureRecipe? = nil) {
         self.id = id
         self.playerId = playerId
         self.sport = sport
@@ -322,6 +329,7 @@ struct GameSession: Codable, Identifiable {
         self.sceneType = sceneType
         self.outputAspectOverride = outputAspectOverride
         self.rankerTierUsed = rankerTierUsed
+        self.captureRecipe = captureRecipe
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -338,6 +346,7 @@ struct GameSession: Codable, Identifiable {
         case localReelFallbackURL
         case status, triggerSource, reelLengthOverride
         case sceneType, outputAspectOverride, rankerTierUsed
+        case captureRecipe
     }
 
     // Custom decode for back-compat across schema migrations:
@@ -378,6 +387,8 @@ struct GameSession: Codable, Identifiable {
                                                      forKey: .outputAspectOverride)
         rankerTierUsed = try c.decodeIfPresent(RankerTier.self,
                                                forKey: .rankerTierUsed)
+        captureRecipe = try c.decodeIfPresent(CaptureRecipe.self,
+                                              forKey: .captureRecipe)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -407,6 +418,7 @@ struct GameSession: Codable, Identifiable {
         try c.encode(sceneType, forKey: .sceneType)
         try c.encodeIfPresent(outputAspectOverride, forKey: .outputAspectOverride)
         try c.encodeIfPresent(rankerTierUsed, forKey: .rankerTierUsed)
+        try c.encodeIfPresent(captureRecipe, forKey: .captureRecipe)
     }
 
     // MARK: - Relative-path helpers (file-scope so tests can hit them)

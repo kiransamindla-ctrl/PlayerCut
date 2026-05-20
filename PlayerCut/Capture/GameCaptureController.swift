@@ -9,6 +9,7 @@
 import AVFoundation
 import Accelerate
 import Foundation
+import UIKit
 import os.log
 
 @MainActor
@@ -36,9 +37,30 @@ final class GameCaptureController: NSObject {
 
     private var currentSession: GameSession?
 
+    /// Recipe the capture session is currently configured to. Set by
+    /// `configure()` (initial selection) and `reconfigure(to:)` (live
+    /// thermal/battery downgrade).
+    private(set) var currentRecipe: CaptureRecipe?
+
+    /// SoC tier we resolved at configure() — held so live downgrade can
+    /// re-derive an updated recipe against the same hardware without
+    /// re-reading utsname.
+    private var socTier: SoCTier = .unknown
+
+    /// Live system observers. Removed in deinit. Empty until configure()
+    /// runs — we install observers there so capture-only consumers of
+    /// this class don't pay the cost.
+    private var systemObservers: [NSObjectProtocol] = []
+
     struct LoudnessSample: Codable {
         let t: Double      // seconds since recording start
         let rms: Float     // 0..1
+    }
+
+    deinit {
+        for token in systemObservers {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 
     // MARK: - Setup
@@ -61,8 +83,16 @@ final class GameCaptureController: NSObject {
             log.warning("AVAudioSession config failed: \(error.localizedDescription)")
         }
 
+        // Battery monitoring has to be opted into before UIDevice will
+        // report a real level. Cheap to enable; survives backgrounding.
+        UIDevice.current.isBatteryMonitoringEnabled = true
+
         session.beginConfiguration()
-        session.sessionPreset = .hd1920x1080
+        // sessionPreset MUST be .inputPriority when we set
+        // device.activeFormat ourselves — otherwise the preset
+        // overrides the format we just picked. The recipe-based path
+        // owns resolution/fps from here on.
+        session.sessionPreset = .inputPriority
 
         // Video input — prefer the ultrawide on A12+ phones because it
         // captures more of the sideline at the same tripod distance.
@@ -82,8 +112,39 @@ final class GameCaptureController: NSObject {
         } else {
             throw PipelineError.captureFailed("No back camera available")
         }
-        try lockCameraForGame(videoDevice, scene: .outdoor)
+
+        // ----- Adaptive capture recipe -----
+        // Pick a recipe from the SoC tier + live thermal/battery state,
+        // then resolve it to a concrete activeFormat on this device.
+        // Step-downs (no HEVC at the requested rate → drop fps; no
+        // 4K → drop to 1080p) all happen inside resolveFormat.
+        socTier = DeviceCapabilities.currentTier()
+        let battery = UIDevice.current.batteryLevel
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        let initialRecipe = DeviceCapabilities.liveRecipe(
+            for: socTier,
+            thermal: ProcessInfo.processInfo.thermalState,
+            batteryLevel: battery,
+            lowPower: lowPower)
+        let (resolvedFormat, resolvedRecipe) =
+            DeviceCapabilities.resolveFormat(initialRecipe, on: videoDevice)
+        guard let format = resolvedFormat else {
+            throw PipelineError.captureFailed(
+                "No AVCaptureDevice.Format satisfies any recipe step-down")
+        }
+        try applyRecipe(resolvedRecipe,
+                        format: format,
+                        to: videoDevice,
+                        scene: .outdoor)
+        self.currentRecipe = resolvedRecipe
         self.videoDevice = videoDevice
+        log.info("Recipe: tier=\(self.socTier.rawValue) → \(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps) \(resolvedRecipe.codec.rawValue, privacy: .public) stab=\(resolvedRecipe.stabilization.rawValue, privacy: .public)")
+        Task.detached { [tier = socTier, recipe = resolvedRecipe] in
+            await DiagnosticsStore.shared.recordEnum(.captureSoCTier, value: tier)
+            await DiagnosticsStore.shared.recordEnum(
+                .captureRecipeResolution, value: recipe.resolution)
+        }
+
         let videoInput = try AVCaptureDeviceInput(device: videoDevice)
         guard session.canAddInput(videoInput) else {
             throw PipelineError.captureFailed("Cannot add video input")
@@ -100,17 +161,26 @@ final class GameCaptureController: NSObject {
         }
         session.addInput(audioInput)
 
-        // Movie file output (HEVC 1080p30)
+        // Movie file output. The codec selection is gated by the
+        // recipe — when we resolved to .h264 (HEVC unavailable on this
+        // format) we honor that explicitly.
         guard session.canAddOutput(videoOutput) else {
             throw PipelineError.captureFailed("Cannot add movie file output")
         }
         session.addOutput(videoOutput)
         if let connection = videoOutput.connection(with: .video) {
-            if videoOutput.availableVideoCodecTypes.contains(.hevc) {
-                videoOutput.setOutputSettings([AVVideoCodecKey: AVVideoCodecType.hevc],
-                                              for: connection)
+            let chosenCodec: AVVideoCodecType
+            if resolvedRecipe.codec == .hevc,
+               videoOutput.availableVideoCodecTypes.contains(.hevc) {
+                chosenCodec = .hevc
+            } else {
+                chosenCodec = .h264
             }
-            connection.preferredVideoStabilizationMode = .standard
+            videoOutput.setOutputSettings(
+                [AVVideoCodecKey: chosenCodec], for: connection)
+            connection.preferredVideoStabilizationMode =
+                stabilizationMode(for: resolvedRecipe.stabilization,
+                                  on: connection)
         }
 
         // Audio data tap for loudness
@@ -122,19 +192,36 @@ final class GameCaptureController: NSObject {
 
         session.commitConfiguration()
         log.info("Capture session configured")
+
+        observeThermalAndBattery()
     }
 
-    /// Lock focus, exposure, and white balance at game start. Tripod is static —
-    /// auto-anything causes pumping/flicker and burns battery.
-    ///
-    /// Scene-aware: indoor venues get a tight fluorescent-targeted WB
-    /// lock (4000 K, neutral tint) which kills the green cast typical
-    /// of school-gym lighting; outdoor venues lock at whatever WB the
-    /// camera auto-detected, which copes well with daylight + cloud.
-    private func lockCameraForGame(_ device: AVCaptureDevice,
-                                   scene: SceneType) throws {
+    // MARK: - Recipe application
+
+    /// Applies a recipe to the camera device: activeFormat, locked
+    /// fps, locked focus/exposure/WB, HDR explicitly off. Caller owns
+    /// session.beginConfiguration / commitConfiguration.
+    private func applyRecipe(_ recipe: CaptureRecipe,
+                             format: AVCaptureDevice.Format,
+                             to device: AVCaptureDevice,
+                             scene: SceneType) throws {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
+
+        // activeFormat must be set before fps lock; iOS rejects the
+        // frame-duration write otherwise.
+        device.activeFormat = format
+
+        // HDR and Dolby Vision: explicitly disabled.
+        // Crunchy/oversaturated for sports + breaks non-Apple sharing.
+        // SOURCE: shopmoment.com/journal/best-iphone-camera-settings
+        // (accessed 2026-01-22).
+        if format.isVideoHDRSupported {
+            device.automaticallyAdjustsVideoHDREnabled = false
+            device.isVideoHDREnabled = false
+        }
+
+        // Lock focus / exposure / WB (existing scene-aware logic).
         if device.isFocusModeSupported(.locked) {
             device.focusMode = .locked
         }
@@ -155,9 +242,155 @@ final class GameCaptureController: NSObject {
                 device.whiteBalanceMode = .locked
             }
         }
-        // 30 fps, locked
-        device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 30)
-        device.activeVideoMaxFrameDuration = CMTime(value: 1, timescale: 30)
+
+        // Lock fps at the recipe value.
+        device.activeVideoMinFrameDuration =
+            CMTime(value: 1, timescale: Int32(recipe.fps))
+        device.activeVideoMaxFrameDuration =
+            CMTime(value: 1, timescale: Int32(recipe.fps))
+    }
+
+    /// Maps the recipe's stabilization choice to a real AVFoundation
+    /// mode, downgrading to `.standard` (or `.off`) when the requested
+    /// mode isn't supported on this connection.
+    private func stabilizationMode(
+        for choice: CaptureRecipe.Stabilization,
+        on connection: AVCaptureConnection
+    ) -> AVCaptureVideoStabilizationMode {
+        switch choice {
+        case .off:        return .off
+        case .standard:   return .standard
+        case .cinematic:
+            // Cinematic stabilization is hardware-gated. Fall back to
+            // .standard rather than rejecting the configuration.
+            if connection.isVideoStabilizationSupported {
+                return .cinematic
+            }
+            return .standard
+        }
+    }
+
+    // MARK: - Live downgrade (thermal + battery)
+
+    /// Subscribes to thermal-state and battery-level changes. On a
+    /// transition that would warrant a recipe step-down we
+    /// reconfigure the active device live where AVFoundation allows
+    /// it. Downgrades are one-way for the current session — we never
+    /// upgrade mid-game (would yank focus / WB).
+    private func observeThermalAndBattery() {
+        // Thermal.
+        systemObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: ProcessInfo.thermalStateDidChangeNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.evaluateDowngrade(trigger: .thermal)
+                }
+            })
+        // Battery level. UIDevice posts changes when the level crosses
+        // a 5 % boundary (system-defined) — fine grain for our 20/10 %
+        // thresholds.
+        systemObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: UIDevice.batteryLevelDidChangeNotification,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.evaluateDowngrade(trigger: .battery)
+                }
+            })
+        // Low-power mode toggles are equivalent to "battery is now
+        // constrained" in our ladder.
+        systemObservers.append(
+            NotificationCenter.default.addObserver(
+                forName: .NSProcessInfoPowerStateDidChange,
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.evaluateDowngrade(trigger: .battery)
+                }
+            })
+    }
+
+    private enum DowngradeTrigger {
+        case thermal, battery
+    }
+
+    /// Re-derives the recipe under current state and applies it if it
+    /// has strictly dropped from the active one. No-op if the active
+    /// recipe still satisfies the ladder.
+    private func evaluateDowngrade(trigger: DowngradeTrigger) {
+        guard let active = currentRecipe,
+              let device = videoDevice else { return }
+        let thermal = ProcessInfo.processInfo.thermalState
+        let battery = UIDevice.current.batteryLevel
+        let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        let target = DeviceCapabilities.downgrade(
+            active,
+            for: thermal,
+            batteryLevel: battery,
+            lowPower: lowPower)
+        guard target != active, isStrictlyLower(target, than: active) else {
+            return
+        }
+        let (resolvedFormat, resolvedRecipe) =
+            DeviceCapabilities.resolveFormat(target, on: device)
+        guard let format = resolvedFormat else {
+            log.warning("Downgrade target has no supported format; staying at \(active.resolution.rawValue)@\(active.fps)")
+            return
+        }
+        let fromDesc = "\(active.resolution.rawValue)@\(active.fps)"
+        let toDesc   = "\(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps)"
+        let sceneNow = currentSession?.sceneType ?? .outdoor
+        do {
+            session.beginConfiguration()
+            defer { session.commitConfiguration() }
+            try applyRecipe(resolvedRecipe,
+                            format: format,
+                            to: device,
+                            scene: sceneNow)
+            currentRecipe = resolvedRecipe
+            // Update the in-flight session so the persisted recipe
+            // reflects what we actually recorded with.
+            if var live = currentSession {
+                live.captureRecipe = resolvedRecipe
+                currentSession = live
+            }
+            log.info("Capture downgrade (\(trigger == .thermal ? "thermal" : "battery", privacy: .public)): \(fromDesc, privacy: .public) → \(toDesc, privacy: .public)")
+            Task.detached {
+                switch trigger {
+                case .thermal:
+                    await DiagnosticsStore.shared
+                        .increment(.captureDowngradeThermal)
+                case .battery:
+                    await DiagnosticsStore.shared
+                        .increment(.captureDowngradeBattery)
+                }
+            }
+        } catch {
+            log.error("Downgrade reconfigure failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// True when `target` is unambiguously a less-demanding recipe
+    /// than `current`. Compares (resolution, fps) — codec/stabilization
+    /// shifts alone don't count as a downgrade.
+    private func isStrictlyLower(_ target: CaptureRecipe,
+                                 than current: CaptureRecipe) -> Bool {
+        // resolution rank: 4K > 1080p
+        let curRes = current.resolution == .uhd4k ? 1 : 0
+        let tgtRes = target.resolution == .uhd4k ? 1 : 0
+        if tgtRes < curRes { return true }
+        if tgtRes == curRes && target.fps < current.fps { return true }
+        // same resolution + same fps, but stab dropped from cinematic.
+        if tgtRes == curRes
+            && target.fps == current.fps
+            && current.stabilization == .cinematic
+            && target.stabilization != .cinematic {
+            return true
+        }
+        return false
     }
 
     private static func clampGains(_ gains: AVCaptureDevice.WhiteBalanceGains,
@@ -239,8 +472,11 @@ final class GameCaptureController: NSObject {
         // params before the actual recording starts. Defaults outdoor on
         // any failure so we never block the user from recording.
         let scene = await sampleSceneType()
-        if let device = videoDevice {
-            try? lockCameraForGame(device, scene: scene)
+        if let device = videoDevice, let recipe = currentRecipe {
+            try? applyRecipe(recipe,
+                             format: device.activeFormat,
+                             to: device,
+                             scene: scene)
         }
 
         if !session.isRunning {
@@ -262,9 +498,10 @@ final class GameCaptureController: NSObject {
                                status: .recording,
                                triggerSource: triggerSource,
                                reelLengthOverride: reelLengthOverride,
-                               sceneType: scene)
+                               sceneType: scene,
+                               captureRecipe: currentRecipe)
         currentSession = game
-        log.info("Recording started: \(id.uuidString) trigger=\(triggerSource.rawValue) scene=\(scene.rawValue)")
+        log.info("Recording started: \(id.uuidString) trigger=\(triggerSource.rawValue) scene=\(scene.rawValue) recipe=\(self.currentRecipe?.resolution.rawValue ?? "?")@\(self.currentRecipe?.fps ?? 0)")
         return game
     }
 
