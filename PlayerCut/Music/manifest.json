@@ -1,0 +1,12 @@
+{
+  "_TODO_LAUNCH": "Real .m4a files have not yet been sourced. See PlayerCut/Music/LICENSES.md for the licensing source decision (Uppbeat vs Pixabay).",
+  "version": 1,
+  "tracks": [
+    { "id": "energetic_1", "vibe": "energetic", "bpm": 138, "durationSeconds": 180, "file": null },
+    { "id": "energetic_2", "vibe": "energetic", "bpm": 142, "durationSeconds": 180, "file": null },
+    { "id": "cinematic_1", "vibe": "cinematic", "bpm": 88,  "durationSeconds": 200, "file": null },
+    { "id": "cinematic_2", "vibe": "cinematic", "bpm": 96,  "durationSeconds": 200, "file": null },
+    { "id": "playful_1",   "vibe": "playful",   "bpm": 120, "durationSeconds": 180, "file": null },
+    { "id": "chill_1",     "vibe": "chill",     "bpm": 90,  "durationSeconds": 200, "file": null }
+  ]
+}

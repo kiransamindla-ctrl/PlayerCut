@@ -66,6 +66,11 @@ struct RootView: View {
     @State private var presentingCapture = false
     @State private var presentingSettings = false
     @State private var presentingCompilation = false
+    @State private var presentingAssistedTier = false
+    @State private var presentingPaywall = false
+    @AppStorage(OnboardingKeys.termsAccepted) private var termsAccepted = false
+    @AppStorage(AssistedKeys.assistedTierShown) private var assistedTierShown = false
+    @AppStorage(PricingKeys.freeReelsUsed) private var freeReelsUsedObserved = 0
 
     var body: some View {
         NavigationStack {
@@ -97,10 +102,23 @@ struct RootView: View {
                     vm: EnrollmentViewModel(store: coordinator.store),
                     onComplete: { _ in
                         presentingEnrollment = false
-                        Task { await coordinator.refresh() }
+                        Task {
+                            await coordinator.refresh()
+                            // Surface the Assisted tier explainer once,
+                            // right after the first successful enrollment.
+                            if !assistedTierShown {
+                                presentingAssistedTier = true
+                            }
+                        }
                     },
                     onCancel: { presentingEnrollment = false }
                 )
+            }
+            .sheet(isPresented: $presentingAssistedTier) {
+                NavigationStack {
+                    AssistedTierView { presentingAssistedTier = false }
+                }
+                .preferredColorScheme(.dark)
             }
             .sheet(isPresented: $presentingSettings) {
                 SettingsView()
@@ -115,6 +133,21 @@ struct RootView: View {
                 if let player = coordinator.players.first {
                     CaptureView(player: player)
                         .environmentObject(coordinator)
+                }
+            }
+            .fullScreenCover(isPresented: .constant(!termsAccepted)) {
+                WelcomeView(onAccepted: { termsAccepted = true })
+            }
+            .sheet(isPresented: $presentingPaywall) {
+                PaywallView(
+                    onSubscribe: { _ in presentingPaywall = false },
+                    onMaybeLater: { presentingPaywall = false }
+                )
+                .preferredColorScheme(.dark)
+            }
+            .onChange(of: freeReelsUsedObserved) { _, _ in
+                if PricingGate.shouldShowPaywall {
+                    presentingPaywall = true
                 }
             }
         }

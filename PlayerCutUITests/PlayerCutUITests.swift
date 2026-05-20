@@ -25,6 +25,14 @@ final class PlayerCutUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = XCUIApplication()
+        // Skip onboarding gates that would block these smoke tests.
+        // Using -<key> <value> sets UserDefaults values for the
+        // running test app process.
+        app.launchArguments += [
+            "-playercut.terms_accepted_v1", "YES",
+            "-playercut.old_phone_intro_shown", "YES",
+            "-playercut.assisted_tier_shown", "YES"
+        ]
         app.launch()
     }
 

@@ -45,7 +45,8 @@ final class EnrollmentViewModel: ObservableObject {
         case jerseyColor = 1
         case selfie = 2
         case reelLength = 3
-        case review = 4
+        case musicVibe = 4
+        case review = 5
 
         var title: String {
             switch self {
@@ -53,6 +54,7 @@ final class EnrollmentViewModel: ObservableObject {
             case .jerseyColor: return "Jersey color"
             case .selfie: return "Add a photo"
             case .reelLength: return "Preferred reel length"
+            case .musicVibe: return "Music vibe"
             case .review: return "Review"
             }
         }
@@ -65,6 +67,8 @@ final class EnrollmentViewModel: ObservableObject {
     @Published var jerseyNumber: String = ""
     @Published var sport: Sport = .soccer
     @Published var reelLengthPreference: ReelLength = .sixtySeconds
+    @Published var musicVibe: MusicVibe = .energetic
+    @Published var outputAspect: OutputAspect = .vertical9x16
 
     @Published var sampledJerseyImage: UIImage?
     @Published var jerseyColorHistogram: HSVHistogram?
@@ -100,6 +104,8 @@ final class EnrollmentViewModel: ObservableObject {
         case .selfie:
             return faceEmbedding != nil && faceQualityIssues.isEmpty
         case .reelLength:
+            return true
+        case .musicVibe:
             return true
         case .review:
             return true
@@ -338,7 +344,9 @@ final class EnrollmentViewModel: ObservableObject {
             faceEmbedding: embedding,
             sport: sport,
             createdAt: Date(),
-            reelLengthPreference: reelLengthPreference
+            reelLengthPreference: reelLengthPreference,
+            outputAspect: outputAspect,
+            musicVibe: musicVibe
         )
         do {
             try await store.upsert(player)

@@ -21,6 +21,13 @@ struct PlayerEnrollment: Codable, Identifiable {
     var sport: Sport
     var createdAt: Date
     var reelLengthPreference: ReelLength = .sixtySeconds
+    var outputAspect: OutputAspect = .vertical9x16
+    var musicVibe: MusicVibe = .energetic
+    /// Optional beacon identifier (iBeacon major+minor packed in the
+    /// UUID's last bytes). Populated by the optional "Pair beacon"
+    /// enrollment step. When present, Stage 2 may skip the OCR/color/
+    /// face stack on frames where the beacon is in-range.
+    var beaconID: String? = nil
 
     init(id: UUID,
          name: String,
@@ -29,7 +36,10 @@ struct PlayerEnrollment: Codable, Identifiable {
          faceEmbedding: [Float],
          sport: Sport,
          createdAt: Date,
-         reelLengthPreference: ReelLength = .sixtySeconds) {
+         reelLengthPreference: ReelLength = .sixtySeconds,
+         outputAspect: OutputAspect = .vertical9x16,
+         musicVibe: MusicVibe = .energetic,
+         beaconID: String? = nil) {
         self.id = id
         self.name = name
         self.jerseyNumber = jerseyNumber
@@ -38,10 +48,14 @@ struct PlayerEnrollment: Codable, Identifiable {
         self.sport = sport
         self.createdAt = createdAt
         self.reelLengthPreference = reelLengthPreference
+        self.outputAspect = outputAspect
+        self.musicVibe = musicVibe
+        self.beaconID = beaconID
     }
 
-    // Back-compat decode for players enrolled before reelLengthPreference
-    // existed — they fall back to the 60s default.
+    // Back-compat decode for players enrolled before reelLengthPreference /
+    // outputAspect / musicVibe / beaconID existed — they fall back to the
+    // documented defaults.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -53,6 +67,11 @@ struct PlayerEnrollment: Codable, Identifiable {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         reelLengthPreference = try c.decodeIfPresent(ReelLength.self,
                                                      forKey: .reelLengthPreference) ?? .sixtySeconds
+        outputAspect = try c.decodeIfPresent(OutputAspect.self,
+                                             forKey: .outputAspect) ?? .vertical9x16
+        musicVibe = try c.decodeIfPresent(MusicVibe.self,
+                                          forKey: .musicVibe) ?? .energetic
+        beaconID = try c.decodeIfPresent(String.self, forKey: .beaconID)
     }
 }
 
@@ -158,6 +177,68 @@ enum SceneType: String, Codable {
     case outdoor
 }
 
+/// Output aspect ratio for the final reel. Defaults to vertical for
+/// social-feed friendly sharing. ReelComposer crops based on the
+/// tracked-player center.
+enum OutputAspect: String, Codable, CaseIterable {
+    case vertical9x16
+    case horizontal16x9
+    case square1x1
+
+    var displayName: String {
+        switch self {
+        case .vertical9x16:   return "9:16 Vertical"
+        case .horizontal16x9: return "16:9 Horizontal"
+        case .square1x1:      return "1:1 Square"
+        }
+    }
+
+    /// Pill-style short label for the capture-screen aspect chip.
+    var pillLabel: String {
+        switch self {
+        case .vertical9x16:   return "9:16"
+        case .horizontal16x9: return "16:9"
+        case .square1x1:      return "1:1"
+        }
+    }
+
+    func renderSize(forLength length: ReelLength) -> CGSize {
+        // ≤3 min reels render at the higher resolution; 5-minute reels
+        // drop to 720-class so the MP4 stays share-friendly.
+        let high = length != .fiveMinutes
+        switch self {
+        case .vertical9x16:
+            return high ? CGSize(width: 1080, height: 1920)
+                        : CGSize(width: 720,  height: 1280)
+        case .horizontal16x9:
+            return high ? CGSize(width: 1920, height: 1080)
+                        : CGSize(width: 1280, height: 720)
+        case .square1x1:
+            return high ? CGSize(width: 1080, height: 1080)
+                        : CGSize(width: 720,  height: 720)
+        }
+    }
+}
+
+/// Music feel applied by the composer when picking from the bundled
+/// library (or when scoring user-imported tracks). Stored on the
+/// player so it doesn't have to be chosen per-game.
+enum MusicVibe: String, Codable, CaseIterable {
+    case energetic
+    case cinematic
+    case playful
+    case chill
+
+    var displayName: String {
+        switch self {
+        case .energetic: return "Energetic"
+        case .cinematic: return "Cinematic"
+        case .playful:   return "Playful"
+        case .chill:     return "Chill"
+        }
+    }
+}
+
 /// Top-level record for one recorded game.
 struct GameSession: Codable, Identifiable {
     let id: UUID
@@ -184,6 +265,8 @@ struct GameSession: Codable, Identifiable {
     /// the capture UI so users can override without changing their default.
     var reelLengthOverride: ReelLength?
     var sceneType: SceneType = .outdoor
+    /// nil → use the player's `outputAspect`. Per-game override.
+    var outputAspectOverride: OutputAspect?
 
     init(id: UUID,
          playerId: UUID,
@@ -199,7 +282,8 @@ struct GameSession: Codable, Identifiable {
          status: GameStatus = .recording,
          triggerSource: TriggerSource = .manual,
          reelLengthOverride: ReelLength? = nil,
-         sceneType: SceneType = .outdoor) {
+         sceneType: SceneType = .outdoor,
+         outputAspectOverride: OutputAspect? = nil) {
         self.id = id
         self.playerId = playerId
         self.sport = sport
@@ -215,6 +299,7 @@ struct GameSession: Codable, Identifiable {
         self.triggerSource = triggerSource
         self.reelLengthOverride = reelLengthOverride
         self.sceneType = sceneType
+        self.outputAspectOverride = outputAspectOverride
     }
 
     // Custom decode for back-compat across schema migrations:
@@ -237,6 +322,8 @@ struct GameSession: Codable, Identifiable {
         triggerSource = try c.decodeIfPresent(TriggerSource.self, forKey: .triggerSource) ?? .manual
         reelLengthOverride = try c.decodeIfPresent(ReelLength.self, forKey: .reelLengthOverride)
         sceneType = try c.decodeIfPresent(SceneType.self, forKey: .sceneType) ?? .outdoor
+        outputAspectOverride = try c.decodeIfPresent(OutputAspect.self,
+                                                     forKey: .outputAspectOverride)
     }
 }
 

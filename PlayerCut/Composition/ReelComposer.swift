@@ -17,15 +17,12 @@ final class ReelComposer {
 
     private let crossfade: Double = 0.3
 
-    /// 1080p for ≤3 min reels; 720p for 5 min so the MP4 stays
-    /// share-friendly (~150 MB at 1080p, ~50 MB at 720p).
-    private func outputSize(for length: ReelLength) -> CGSize {
-        switch length {
-        case .fiveMinutes:
-            return CGSize(width: 720, height: 1280)
-        default:
-            return CGSize(width: 1080, height: 1920)
-        }
+    /// 1080-class for ≤3 min reels; 720-class for 5 min so the MP4 stays
+    /// share-friendly (~150 MB at 1080p, ~50 MB at 720p). Aspect-aware:
+    /// vertical 9:16, horizontal 16:9, square 1:1 are all supported.
+    private func outputSize(for length: ReelLength,
+                            aspect: OutputAspect) -> CGSize {
+        aspect.renderSize(forLength: length)
     }
 
     /// Outcome of a compose+save run. Returned by `compose` so the
@@ -47,7 +44,8 @@ final class ReelComposer {
                  musicURL: URL?,
                  outputURL: URL) async throws -> Result {
 
-        let outputSize = outputSize(for: length)
+        let aspect = game.outputAspectOverride ?? player.outputAspect
+        let outputSize = outputSize(for: length, aspect: aspect)
         let composition = AVMutableComposition()
         let videoComposition = AVMutableVideoComposition()
         videoComposition.renderSize = outputSize

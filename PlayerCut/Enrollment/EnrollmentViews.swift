@@ -52,6 +52,8 @@ struct EnrollmentRootView: View {
                             SelfieStepView(vm: vm)
                         case .reelLength:
                             ReelLengthStepView(vm: vm)
+                        case .musicVibe:
+                            MusicVibeStepView(vm: vm)
                         case .review:
                             ReviewStepView(vm: vm)
                         }
@@ -326,7 +328,31 @@ struct ReelLengthStepView: View {
     }
 }
 
-// MARK: - Step 5: review
+// MARK: - Step 5: music vibe
+
+struct MusicVibeStepView: View {
+    @ObservedObject var vm: EnrollmentViewModel
+
+    var body: some View {
+        Form {
+            Section {
+                Picker("Vibe", selection: $vm.musicVibe) {
+                    ForEach(MusicVibe.allCases, id: \.self) { v in
+                        Text(v.displayName).tag(v)
+                    }
+                }
+                .pickerStyle(.inline)
+                .labelsHidden()
+            } header: {
+                Text("Music vibe")
+            } footer: {
+                Text("PlayerCut beat-syncs your reel to the music. Pick the feel that matches the sport.")
+            }
+        }
+    }
+}
+
+// MARK: - Step 6: review
 
 struct ReviewStepView: View {
     @ObservedObject var vm: EnrollmentViewModel
@@ -338,6 +364,7 @@ struct ReviewStepView: View {
                 LabeledContent("Jersey #", value: vm.jerseyNumber)
                 LabeledContent("Sport", value: vm.sport.rawValue.capitalized)
                 LabeledContent("Reel length", value: vm.reelLengthPreference.displayName)
+                LabeledContent("Music vibe", value: vm.musicVibe.displayName)
             }
 
             Section("Identification signals") {

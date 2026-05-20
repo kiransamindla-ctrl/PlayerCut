@@ -172,6 +172,14 @@ actor PipelineOrchestrator {
                     await DiagnosticsStore.shared.recordDuration(
                         .totalPipeline,
                         seconds: Date().timeIntervalSince(pipelineStart))
+                    // Free-trial accounting: only counts completed reels
+                    // on the free plan, so paid users don't burn the
+                    // counter accidentally on a refund/downgrade.
+                    if PricingGate.currentPlan == .freeTrial {
+                        await MainActor.run {
+                            PricingGate.recordFreeReelConsumed()
+                        }
+                    }
 
                     // Surface the reel URL the UI can use right now:
                     // the in-Photos copy lives behind a PHAsset id, so

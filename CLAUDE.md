@@ -50,6 +50,19 @@ xcodebuild test -project PlayerCut.xcodeproj -scheme PlayerCut \
   -destination 'platform=iOS Simulator,name=iPhone 15'
 ```
 
+## POLICY 1 — Tech stack (no licensed cloud SDKs ever)
+
+- Apple-native frameworks first (AVFoundation, Vision, Core ML, Core Bluetooth, Core Motion, AVAudioEngine, vDSP, Metal, VideoToolbox).
+- Open-source libraries with Apache 2.0, BSD, or MIT licenses are allowed only when Apple-native is materially inferior. Specifically permitted: MediaPipe BlazePose (Apache 2.0), BYTETrack reference implementation (MIT), aubio onset detector (Apache 2.0).
+- Licensed cloud SDKs and any service that requires sending raw video off-device are forbidden. They break the privacy moat and impose per-reel costs that destroy unit economics at $29/yr.
+- Every dependency added must include license name, source URL, last-update date, and reason Apple-native is insufficient. Tracked in `Dependencies.md` at the repo root; updated on every add/remove.
+
+## POLICY 2 — Source citations for every factual claim
+
+- Code comments that make non-obvious factual claims must carry a `// SOURCE:` comment with URL and accessed date.
+- CLAUDE.md, PR descriptions, and any user-facing copy must cite source name + date + URL for every factual claim.
+- Mark facts in product copy / marketing with confidence tags: 🟢 Verified · 🟡 Inferred · 🔴 Unverified.
+
 ## Pre-delivery smoke test protocol (mandatory)
 
 Before telling the user "ready to test", run every step. Do NOT declare

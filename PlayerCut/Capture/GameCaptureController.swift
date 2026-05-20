@@ -47,11 +47,23 @@ final class GameCaptureController: NSObject {
         session.beginConfiguration()
         session.sessionPreset = .hd1920x1080
 
-        // Video input — back wide camera
-        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera,
-                                                        for: .video,
-                                                        position: .back) else {
-            throw PipelineError.captureFailed("No back camera")
+        // Video input — prefer the ultrawide on A12+ phones because it
+        // captures more of the sideline at the same tripod distance.
+        // Fall back to the standard wide if the device doesn't expose
+        // an ultrawide (older models, or specific iPhone SEs).
+        let videoDevice: AVCaptureDevice
+        if let ultrawide = AVCaptureDevice.default(.builtInUltraWideCamera,
+                                                   for: .video,
+                                                   position: .back) {
+            videoDevice = ultrawide
+            log.info("Capture device: builtInUltraWideCamera")
+        } else if let wide = AVCaptureDevice.default(.builtInWideAngleCamera,
+                                                     for: .video,
+                                                     position: .back) {
+            videoDevice = wide
+            log.info("Capture device: builtInWideAngleCamera (no ultrawide available)")
+        } else {
+            throw PipelineError.captureFailed("No back camera available")
         }
         try lockCameraForGame(videoDevice, scene: .outdoor)
         self.videoDevice = videoDevice
