@@ -52,6 +52,11 @@ final class GameCaptureController: NSObject {
     /// this class don't pay the cost.
     private var systemObservers: [NSObjectProtocol] = []
 
+    /// TEMPORARY diagnostic. Populated at the configure() / start /
+    /// watchdog / runtime-error points so the on-screen overlay can
+    /// display the values to a user who can't read Console.app.
+    let debugInfo = CaptureDebugInfo()
+
     struct LoudnessSample: Codable {
         let t: Double      // seconds since recording start
         let rms: Float     // 0..1
@@ -85,6 +90,8 @@ final class GameCaptureController: NSObject {
 
     func configure() throws {
         log.info("configure() start")
+        debugInfo.configureStarted = true
+        debugInfo.observeRuntimeErrors(on: session)
         // B3: pin the audio session to .playAndRecord for the duration
         // of the capture session. The default .ambient category would
         // be deactivated by AVCapture and re-activated on each output,
@@ -196,8 +203,12 @@ final class GameCaptureController: NSObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
             self.session.startRunning()
+            let running = self.session.isRunning
             Logger(subsystem: "com.playercut.app", category: "Capture")
-                .info("configure() session.startRunning() returned, isRunning=\(self.session.isRunning)")
+                .info("configure() session.startRunning() returned, isRunning=\(running)")
+            Task { @MainActor [weak self] in
+                self?.debugInfo.startRunningSawIsRunning = running
+            }
         }
 
         observeThermalAndBattery()
@@ -214,6 +225,7 @@ final class GameCaptureController: NSObject {
         }
 
         log.info("configure() returning — preview should go live shortly")
+        debugInfo.configureReturned = true
     }
 
     /// Best-effort recipe application. Picks the ideal recipe for the
@@ -224,6 +236,7 @@ final class GameCaptureController: NSObject {
     /// running when we get here, so the preview never goes dark.
     private func applyRecipeBestEffort(on device: AVCaptureDevice) {
         socTier = DeviceCapabilities.currentTier()
+        debugInfo.resolvedTier = socTier.rawValue
         let battery = UIDevice.current.batteryLevel
         let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
         let initialRecipe = DeviceCapabilities.liveRecipe(
@@ -237,6 +250,7 @@ final class GameCaptureController: NSObject {
             DeviceCapabilities.resolveFormat(initialRecipe, on: device)
         guard let format = resolvedFormat else {
             log.warning("recipe: no AVCaptureDevice.Format satisfies any step-down — staying on device default")
+            debugInfo.recipeOutcome = "NO FORMAT (fell back to device default)"
             return
         }
         do {
@@ -261,6 +275,7 @@ final class GameCaptureController: NSObject {
                                       on: connection)
             }
             log.info("recipe APPLIED: \(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps) \(resolvedRecipe.codec.rawValue, privacy: .public) stab=\(resolvedRecipe.stabilization.rawValue, privacy: .public)")
+            debugInfo.recipeOutcome = "APPLIED \(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps) \(resolvedRecipe.codec.rawValue) \(resolvedRecipe.stabilization.rawValue)"
             Task.detached { [tier = socTier, recipe = resolvedRecipe] in
                 await DiagnosticsStore.shared.recordEnum(
                     .captureSoCTier, value: tier)
@@ -269,6 +284,7 @@ final class GameCaptureController: NSObject {
             }
         } catch {
             log.error("recipe apply FAILED: \(error.localizedDescription) — staying on device default; preview unaffected")
+            debugInfo.recipeOutcome = "FAILED: \(error.localizedDescription)"
         }
     }
 
@@ -281,10 +297,17 @@ final class GameCaptureController: NSObject {
             if self.session.isRunning {
                 Logger(subsystem: "com.playercut.app", category: "Capture")
                     .info("watchdog: session already running, no-op")
+                Task { @MainActor [weak self] in
+                    self?.debugInfo.watchdogSawIsRunning = true
+                }
                 return
             }
             Logger(subsystem: "com.playercut.app", category: "Capture")
                 .error("watchdog: session NOT running after grace period — force-starting")
+            Task { @MainActor [weak self] in
+                self?.debugInfo.watchdogSawIsRunning = false
+                self?.debugInfo.watchdogForcedRestart = true
+            }
             self.session.startRunning()
         }
     }

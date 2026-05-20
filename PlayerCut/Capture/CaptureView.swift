@@ -53,6 +53,12 @@ struct CaptureView: View {
     private let log = Logger(subsystem: "com.playercut.app", category: "CaptureUI")
     private let timer = Timer.publish(every: 0.5, on: .main, in: .common)
         .autoconnect()
+    /// TEMPORARY: 4 Hz tick refreshing the diagnostic overlay + polling
+    /// session.isRunning. Remove with the overlay.
+    @State private var debugTick: Date = Date()
+    private let debugTimer = Timer.publish(every: 0.25,
+                                           on: .main,
+                                           in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -68,6 +74,44 @@ struct CaptureView: View {
                 bottomBar
             }
             .padding()
+
+            // TEMPORARY diagnostic overlay — read these values off the
+            // phone screen and report back. Remove with this file's
+            // changes once the preview-black regression is diagnosed.
+            VStack(alignment: .leading, spacing: 3) {
+                debugRow("isRunning (live)",
+                         coordinator.captureController.debugInfo
+                            .liveSessionIsRunning ? "true" : "false")
+                debugRow("after startRunning()",
+                         debugBoolString(coordinator.captureController
+                                            .debugInfo.startRunningSawIsRunning))
+                debugRow("watchdog saw running",
+                         debugBoolString(coordinator.captureController
+                                            .debugInfo.watchdogSawIsRunning))
+                debugRow("watchdog forced restart",
+                         coordinator.captureController.debugInfo
+                            .watchdogForcedRestart ? "YES" : "no")
+                debugRow("recipe",
+                         coordinator.captureController.debugInfo.recipeOutcome)
+                debugRow("tier",
+                         coordinator.captureController.debugInfo.resolvedTier)
+                debugRow("configure done",
+                         coordinator.captureController.debugInfo
+                            .configureReturned ? "true" : "false")
+                debugRow("AVCapture err",
+                         coordinator.captureController.debugInfo
+                            .lastSessionRuntimeError ?? "—")
+            }
+            .font(.system(size: 11, weight: .regular, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(8)
+            .background(.black.opacity(0.78),
+                        in: RoundedRectangle(cornerRadius: 6))
+            .frame(maxWidth: .infinity, maxHeight: .infinity,
+                   alignment: .topLeading)
+            .padding(.top, 70)
+            .padding(.leading, 12)
+            .allowsHitTesting(false)
 
             if let errorMessage {
                 VStack {
@@ -115,6 +159,37 @@ struct CaptureView: View {
             if let startedAt {
                 elapsed = Date().timeIntervalSince(startedAt)
             }
+        }
+        .onReceive(debugTimer) { now in
+            // TEMPORARY: pull the live session.isRunning into the
+            // observed debugInfo so the overlay shows whether the
+            // session is actually pumping, independent of any "we
+            // saw isRunning" snapshot from configure() or watchdog.
+            coordinator.captureController.debugInfo.liveSessionIsRunning =
+                coordinator.captureController.session.isRunning
+            debugTick = now
+        }
+    }
+
+    // MARK: - Diagnostic overlay helpers (TEMPORARY)
+
+    private func debugRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(label + ":")
+                .frame(width: 165, alignment: .leading)
+                .foregroundStyle(.white.opacity(0.7))
+            Text(value)
+                .foregroundStyle(.white)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func debugBoolString(_ b: Bool?) -> String {
+        switch b {
+        case .none:        return "—"
+        case .some(true):  return "true"
+        case .some(false): return "FALSE"
         }
     }
 
