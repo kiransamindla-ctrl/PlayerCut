@@ -151,6 +151,30 @@ final class ReelComposer {
             throw PipelineError.compositionFailed("Export ended in unexpected state")
         }
 
+        // Belt-and-braces: confirm the file is fully flushed before
+        // declaring the reel ready. AVAssetExportSession sometimes
+        // reports `.completed` before the writer has closed the moov
+        // atom, which surfaces downstream as a zero-byte file that
+        // GameDetailView would refuse to play. Block until the file
+        // exists with non-zero size or fail loudly.
+        let fm = FileManager.default
+        var attempts = 0
+        while attempts < 20 {
+            if fm.fileExists(atPath: outputURL.path) {
+                let attrs = try? fm.attributesOfItem(atPath: outputURL.path)
+                let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+                if size > 0 { break }
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            attempts += 1
+        }
+        guard fm.fileExists(atPath: outputURL.path),
+              let attrs = try? fm.attributesOfItem(atPath: outputURL.path),
+              let size = (attrs[.size] as? NSNumber)?.intValue, size > 0 else {
+            throw PipelineError.compositionFailed(
+                "Export reported completed but output file is missing or empty")
+        }
+
         // The local file at `outputURL` is the canonical playback
         // source from here on. The orchestrator places it directly in
         // Documents/reels/<id>.mp4 so we don't need to relocate.

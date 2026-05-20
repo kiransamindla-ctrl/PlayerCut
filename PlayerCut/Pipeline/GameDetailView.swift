@@ -20,6 +20,7 @@ import SwiftUI
 struct GameDetailView: View {
 
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.scenePhase) private var scenePhase
     let gameID: UUID
 
     @State private var game: GameSession?
@@ -29,6 +30,13 @@ struct GameDetailView: View {
     @State private var presentingShare = false
     @State private var manualRun: Task<Void, Never>?
     @State private var manualRunLog: String?
+    /// Stable AVPlayer for the completed reel. Held in @State so the
+    /// player survives a body re-render — without this, inline
+    /// `AVPlayer(url:)` produces a fresh AVPlayer each pass and the
+    /// item gets re-loaded, which shows as a white/black flash on
+    /// return from background.
+    @State private var avPlayer: AVPlayer?
+    @State private var playerURL: URL?
 
     var body: some View {
         ZStack {
@@ -47,6 +55,23 @@ struct GameDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .task { await reload() }
         .onReceive(refreshTimer) { _ in Task { await reload() } }
+        .onChange(of: scenePhase) { _, new in
+            // Pause the player when we leave foreground; resume when we
+            // return. Without this, returning from Photos lands on a
+            // detached video layer that renders as a white frame until
+            // the user scrubs.
+            switch new {
+            case .active:
+                if avPlayer != nil { avPlayer?.play() }
+            case .inactive, .background:
+                avPlayer?.pause()
+            @unknown default:
+                break
+            }
+        }
+        .onDisappear {
+            avPlayer?.pause()
+        }
     }
 
     @ViewBuilder
@@ -67,11 +92,12 @@ struct GameDetailView: View {
         // exist on disk before we hand it to AVPlayer.
         if let local = playableLocalURL(for: game) {
             VStack(spacing: 0) {
-                VideoPlayer(player: AVPlayer(url: local))
+                VideoPlayer(player: playerFor(url: local))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black)
                     .onAppear {
                         Task { await DiagnosticsStore.shared.increment(.reelPlayedFromLocal) }
+                        playerFor(url: local).play()
                     }
 
                 VStack(spacing: 8) {
@@ -192,6 +218,23 @@ struct GameDetailView: View {
     private func playableLocalURL(for game: GameSession) -> URL? {
         guard let url = game.localReelURL else { return nil }
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    /// Lazy, stable AVPlayer. We only create one (or replace it when
+    /// the URL actually changes) so SwiftUI body re-renders don't
+    /// dispose the video layer underneath the running playback.
+    @discardableResult
+    private func playerFor(url: URL) -> AVPlayer {
+        if let p = avPlayer, playerURL == url { return p }
+        let p = AVPlayer(url: url)
+        // SwiftUI reads back the value during a subsequent layout pass;
+        // assigning during view-building is allowed because @State is
+        // reference-semantics underneath.
+        DispatchQueue.main.async {
+            self.avPlayer = p
+            self.playerURL = url
+        }
+        return p
     }
 
     private func openSystemSettings() {

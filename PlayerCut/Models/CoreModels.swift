@@ -250,11 +250,15 @@ struct GameSession: Codable, Identifiable {
     var audioLoudnessURL: URL
     var stage1Result: Stage1Result?
     var stage2Result: Stage2Result?
-    /// Canonical local copy of the finished reel. Documents/reels/<id>.mp4
-    /// — always set after a successful compose, regardless of whether
-    /// Photos access was granted. This is the playback source for
-    /// GameDetailView and the share-sheet item; never replaced by a
-    /// PHAsset fetch (which can't read under add-only).
+    /// Canonical local copy of the finished reel. Stored on disk as a
+    /// relative path (e.g. "reels/<id>.mp4") under Documents/ and
+    /// rebuilt against the *current* Documents URL on every decode.
+    /// iOS rewrites the container UUID on reinstall (and across some
+    /// upgrades), so an absolute URL captured at write time can no
+    /// longer be resolved at read time — the relative form is the
+    /// only durable representation.
+    /// The in-memory value is always an absolute URL pointing into
+    /// the current container.
     var localReelURL: URL?
     /// True when a *copy* of the reel was successfully added to the
     /// user's Photos library (Recents at minimum, optionally also the
@@ -320,9 +324,26 @@ struct GameSession: Codable, Identifiable {
         self.rankerTierUsed = rankerTierUsed
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, playerId, sport, startedAt, endedAt
+        case rawVideoURL, audioLoudnessURL
+        case stage1Result, stage2Result
+        /// Canonical: relative path under Documents/. Written by encode(to:).
+        case localReelRelativePath
+        /// Legacy: absolute URL. Read-only — preserved here so games
+        /// recorded before the migration can still resolve their reels
+        /// after a container UUID change.
+        case localReelURL
+        case savedToPhotos, exportedReelAssetId
+        case localReelFallbackURL
+        case status, triggerSource, reelLengthOverride
+        case sceneType, outputAspectOverride, rankerTierUsed
+    }
+
     // Custom decode for back-compat across schema migrations:
     //   - exportedReelURL (pre-PHAsset) → ignored; assetId defaults nil
     //   - triggerSource / reelLengthOverride / sceneType defaults if absent
+    //   - localReelURL absolute → relativePath migration (see Self.rebase)
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id)
@@ -334,7 +355,18 @@ struct GameSession: Codable, Identifiable {
         audioLoudnessURL = try c.decode(URL.self, forKey: .audioLoudnessURL)
         stage1Result = try c.decodeIfPresent(Stage1Result.self, forKey: .stage1Result)
         stage2Result = try c.decodeIfPresent(Stage2Result.self, forKey: .stage2Result)
-        localReelURL = try c.decodeIfPresent(URL.self, forKey: .localReelURL)
+        // Reel location — prefer the new relative path; if missing, fall
+        // back to the legacy absolute URL and rebase it onto the current
+        // Documents container so a reinstall doesn't orphan the file.
+        if let rel = try c.decodeIfPresent(String.self,
+                                           forKey: .localReelRelativePath) {
+            localReelURL = Self.absoluteURL(forRelativePath: rel)
+        } else if let absolute = try c.decodeIfPresent(URL.self,
+                                                       forKey: .localReelURL) {
+            localReelURL = Self.rebaseIntoCurrentDocuments(absolute)
+        } else {
+            localReelURL = nil
+        }
         savedToPhotos = try c.decodeIfPresent(Bool.self, forKey: .savedToPhotos) ?? false
         exportedReelAssetId = try c.decodeIfPresent(String.self, forKey: .exportedReelAssetId)
         localReelFallbackURL = try c.decodeIfPresent(URL.self, forKey: .localReelFallbackURL)
@@ -346,6 +378,79 @@ struct GameSession: Codable, Identifiable {
                                                      forKey: .outputAspectOverride)
         rankerTierUsed = try c.decodeIfPresent(RankerTier.self,
                                                forKey: .rankerTierUsed)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(playerId, forKey: .playerId)
+        try c.encode(sport, forKey: .sport)
+        try c.encode(startedAt, forKey: .startedAt)
+        try c.encodeIfPresent(endedAt, forKey: .endedAt)
+        try c.encode(rawVideoURL, forKey: .rawVideoURL)
+        try c.encode(audioLoudnessURL, forKey: .audioLoudnessURL)
+        try c.encodeIfPresent(stage1Result, forKey: .stage1Result)
+        try c.encodeIfPresent(stage2Result, forKey: .stage2Result)
+        // Always persist the reel location as a relative path — never an
+        // absolute URL. The container UUID iOS hands us changes across
+        // reinstalls and some upgrades, so the absolute form goes stale.
+        if let url = localReelURL,
+           let rel = Self.relativePath(toDocuments: url) {
+            try c.encode(rel, forKey: .localReelRelativePath)
+        }
+        try c.encode(savedToPhotos, forKey: .savedToPhotos)
+        try c.encodeIfPresent(exportedReelAssetId, forKey: .exportedReelAssetId)
+        try c.encodeIfPresent(localReelFallbackURL, forKey: .localReelFallbackURL)
+        try c.encode(status, forKey: .status)
+        try c.encode(triggerSource, forKey: .triggerSource)
+        try c.encodeIfPresent(reelLengthOverride, forKey: .reelLengthOverride)
+        try c.encode(sceneType, forKey: .sceneType)
+        try c.encodeIfPresent(outputAspectOverride, forKey: .outputAspectOverride)
+        try c.encodeIfPresent(rankerTierUsed, forKey: .rankerTierUsed)
+    }
+
+    // MARK: - Relative-path helpers (file-scope so tests can hit them)
+
+    /// Returns the current Documents directory. Resolved fresh every
+    /// time so a container UUID change after launch can't poison a
+    /// cached value.
+    static var documentsURL: URL {
+        FileManager.default.urls(for: .documentDirectory,
+                                 in: .userDomainMask)[0]
+    }
+
+    /// Absolute file URL inside the current Documents container for a
+    /// relative path like "reels/<id>.mp4".
+    static func absoluteURL(forRelativePath rel: String) -> URL {
+        documentsURL.appendingPathComponent(rel)
+    }
+
+    /// Path of a URL relative to the current Documents container, or
+    /// nil if the URL is not inside Documents (and can't be salvaged).
+    static func relativePath(toDocuments url: URL) -> String? {
+        let docs = documentsURL.standardizedFileURL.path
+        let p = url.standardizedFileURL.path
+        if p.hasPrefix(docs + "/") {
+            return String(p.dropFirst(docs.count + 1))
+        }
+        // Salvage path: the URL was written against an older container,
+        // but the relative structure under Documents/ is stable
+        // ("reels/<id>.mp4"). Pull the segment after "/Documents/".
+        if let range = p.range(of: "/Documents/", options: [.backwards]) {
+            return String(p[range.upperBound...])
+        }
+        return nil
+    }
+
+    /// Rebuild an absolute URL inside the current Documents container
+    /// from a (possibly stale) absolute URL written by an older install.
+    /// Falls back to assuming the file belongs under Documents/reels/
+    /// when no /Documents/ segment is present in the input.
+    static func rebaseIntoCurrentDocuments(_ url: URL) -> URL {
+        if let rel = relativePath(toDocuments: url) {
+            return absoluteURL(forRelativePath: rel)
+        }
+        return absoluteURL(forRelativePath: "reels/\(url.lastPathComponent)")
     }
 }
 

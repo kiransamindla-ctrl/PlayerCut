@@ -15,6 +15,7 @@ struct CaptureView: View {
 
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     let player: PlayerEnrollment
 
@@ -35,9 +36,10 @@ struct CaptureView: View {
     @State private var sessionReelLength: ReelLength
     @State private var showingLengthPicker = false
     @State private var armedPulse = false
-    /// Brightness we observed before dimming; restored on stop so we
-    /// don't leave the user's phone at 10% after capture.
-    @State private var savedBrightness: CGFloat = 1.0
+    /// Whether the screen is currently dimmed by *this* CaptureView. The
+    /// pre-dim brightness value itself lives in BrightnessKeeper so it
+    /// survives scenePhase changes and even app termination — without
+    /// that, backgrounding mid-record strands the screen at 10%.
     @State private var screenDimmed = false
 
     init(player: PlayerEnrollment) {
@@ -85,7 +87,7 @@ struct CaptureView: View {
                     .contentShape(Rectangle())
                     .ignoresSafeArea()
                     .onTapGesture {
-                        UIScreen.main.brightness = savedBrightness
+                        BrightnessKeeper.restore()
                         screenDimmed = false
                     }
                     .accessibilityIdentifier("tap-to-wake")
@@ -103,10 +105,34 @@ struct CaptureView: View {
         }
         .onAppear { onAppear() }
         .onDisappear { onDisappear() }
+        .onChange(of: scenePhase) { _, newPhase in
+            handleScenePhase(newPhase)
+        }
         .onReceive(timer) { _ in
             if let startedAt {
                 elapsed = Date().timeIntervalSince(startedAt)
             }
+        }
+    }
+
+    /// Restore brightness immediately on any leave-active transition so
+    /// the user doesn't land in another app or on the home screen with
+    /// their phone stuck at 10%. On return to .active, only re-dim if a
+    /// recording is still in progress.
+    private func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            if isRecording && !screenDimmed {
+                BrightnessKeeper.dim()
+                screenDimmed = true
+            }
+        case .inactive, .background:
+            if screenDimmed {
+                BrightnessKeeper.restore()
+                screenDimmed = false
+            }
+        @unknown default:
+            break
         }
     }
 
@@ -377,16 +403,15 @@ struct CaptureView: View {
     /// drive a 600-nit panel nobody is looking at.
     private func applyCapturePowerProfile() {
         UIApplication.shared.isIdleTimerDisabled = true
-        savedBrightness = UIScreen.main.brightness
-        UIScreen.main.brightness = 0.1
+        BrightnessKeeper.dim()
         screenDimmed = true
         Task { await DiagnosticsStore.shared.increment(.idleTimerDisabledDuringCapture) }
     }
 
     private func restorePowerProfile() {
         UIApplication.shared.isIdleTimerDisabled = false
-        if screenDimmed {
-            UIScreen.main.brightness = savedBrightness
+        if screenDimmed || BrightnessKeeper.isDimmed {
+            BrightnessKeeper.restore()
             screenDimmed = false
         }
     }
