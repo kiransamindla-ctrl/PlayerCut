@@ -79,13 +79,12 @@ struct CaptureView: View {
             // phone screen and report back. Remove with this file's
             // changes once the preview-black regression is diagnosed.
             VStack(alignment: .leading, spacing: 3) {
-                debugRow("isRunning (live)",
+                debugRow("session.isRunning",
                          coordinator.captureController.debugInfo
-                            .liveSessionIsRunning ? "true" : "false")
-                debugRow("after startRunning()",
-                         debugBoolString(coordinator.captureController
-                                            .debugInfo.startRunningSawIsRunning))
-                debugRow("watchdog saw running",
+                            .liveSessionIsRunning ? "true" : "FALSE")
+                debugRow("configured (View)",
+                         configured ? "true" : "FALSE")
+                debugRow("watchdog isRunning@3s",
                          debugBoolString(coordinator.captureController
                                             .debugInfo.watchdogSawIsRunning))
                 debugRow("watchdog forced restart",
@@ -93,12 +92,11 @@ struct CaptureView: View {
                             .watchdogForcedRestart ? "YES" : "no")
                 debugRow("recipe",
                          coordinator.captureController.debugInfo.recipeOutcome)
-                debugRow("tier",
-                         coordinator.captureController.debugInfo.resolvedTier)
-                debugRow("configure done",
-                         coordinator.captureController.debugInfo
-                            .configureReturned ? "true" : "false")
-                debugRow("AVCapture err",
+                debugRow("camera",
+                         coordinator.captureController.debugInfo.selectedCamera)
+                debugRow("active format",
+                         coordinator.captureController.debugInfo.liveActiveFormat)
+                debugRow("AVCaptureSession error",
                          coordinator.captureController.debugInfo
                             .lastSessionRuntimeError ?? "—")
             }
@@ -161,12 +159,14 @@ struct CaptureView: View {
             }
         }
         .onReceive(debugTimer) { now in
-            // TEMPORARY: pull the live session.isRunning into the
-            // observed debugInfo so the overlay shows whether the
-            // session is actually pumping, independent of any "we
-            // saw isRunning" snapshot from configure() or watchdog.
-            coordinator.captureController.debugInfo.liveSessionIsRunning =
-                coordinator.captureController.session.isRunning
+            // TEMPORARY: poll live session.isRunning + the device's
+            // current activeFormat into the observed debugInfo so the
+            // overlay reflects the real state of the AV pipeline
+            // independent of any single-shot snapshot from configure()
+            // or the watchdog.
+            let ctrl = coordinator.captureController
+            ctrl.debugInfo.liveSessionIsRunning = ctrl.session.isRunning
+            ctrl.debugInfo.liveActiveFormat = ctrl.currentActiveFormatDescription()
             debugTick = now
         }
     }

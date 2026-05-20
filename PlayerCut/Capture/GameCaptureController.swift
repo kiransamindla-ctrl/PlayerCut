@@ -134,13 +134,16 @@ final class GameCaptureController: NSObject {
                                                    position: .back) {
             videoDevice = ultrawide
             log.info("configure() video device: builtInUltraWideCamera")
+            debugInfo.selectedCamera = "ultrawide"
         } else if let wide = AVCaptureDevice.default(.builtInWideAngleCamera,
                                                      for: .video,
                                                      position: .back) {
             videoDevice = wide
             log.info("configure() video device: builtInWideAngleCamera (no ultrawide)")
+            debugInfo.selectedCamera = "wide (no ultrawide)"
         } else {
             session.commitConfiguration()
+            debugInfo.selectedCamera = "(none)"
             throw PipelineError.captureFailed("No back camera available")
         }
 
@@ -286,6 +289,28 @@ final class GameCaptureController: NSObject {
             log.error("recipe apply FAILED: \(error.localizedDescription) — staying on device default; preview unaffected")
             debugInfo.recipeOutcome = "FAILED: \(error.localizedDescription)"
         }
+    }
+
+    /// Returns a short description of the current videoDevice's
+    /// activeFormat (dimensions + max fps + media subtype four-char-code)
+    /// suitable for the diagnostic overlay. "(no device)" when configure
+    /// hasn't run yet.
+    func currentActiveFormatDescription() -> String {
+        guard let device = videoDevice else { return "(no device)" }
+        let f = device.activeFormat
+        let d = CMVideoFormatDescriptionGetDimensions(f.formatDescription)
+        let subtype = CMFormatDescriptionGetMediaSubType(f.formatDescription)
+        // Decode 'hvc1' / '420v' / etc. to its character form.
+        let chars = [
+            UInt8((subtype >> 24) & 0xFF),
+            UInt8((subtype >> 16) & 0xFF),
+            UInt8((subtype >>  8) & 0xFF),
+            UInt8( subtype        & 0xFF)
+        ]
+        let subtypeStr = String(bytes: chars, encoding: .ascii) ?? "????"
+        let maxFps = f.videoSupportedFrameRateRanges
+            .map(\.maxFrameRate).max() ?? 0
+        return "\(d.width)x\(d.height) @\(Int(maxFps)) \(subtypeStr)"
     }
 
     /// External watchdog hook: if the preview hasn't gone live within

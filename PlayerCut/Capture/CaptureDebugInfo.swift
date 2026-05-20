@@ -52,11 +52,22 @@ final class CaptureDebugInfo: ObservableObject {
     /// SoC tier as DeviceCapabilities resolved it at configure().
     @Published var resolvedTier: String = "?"
 
+    /// "ultrawide" / "wide" / "(none)" — set when configure() picks the
+    /// AVCaptureDevice. Reflects the actual hardware unit feeding the
+    /// session, not just what the recipe asked for.
+    @Published var selectedCamera: String = "(not picked)"
+
     /// Live `session.isRunning` polled by the view. Set from the view
     /// because polling AVCaptureSession.isRunning is cheap and reading
     /// it inside the controller closures would require explicit
     /// scheduling.
     @Published var liveSessionIsRunning: Bool = false
+
+    /// Live `device.activeFormat` description polled by the view —
+    /// e.g. "3840x2160 @60 hvc1" or "1920x1080 @30 420v". Updates even
+    /// if applyRecipe never ran (shows whatever the device defaulted
+    /// to under sessionPreset .inputPriority).
+    @Published var liveActiveFormat: String = "(unknown)"
 
     private var sessionErrorToken: NSObjectProtocol?
 
