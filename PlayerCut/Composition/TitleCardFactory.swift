@@ -19,12 +19,45 @@ import UIKit
 
 enum TitleCardFactory {
 
-    /// Build a transparent layer of `size` that holds:
-    ///   - title card animation (fade in / slide / fade out)
-    ///   - lower-third (slides in/out during the first body window)
-    ///   - closing card animation
-    /// Each child layer's `beginTime` and animation timing is in
-    /// composition time (seconds from reel start).
+    // MARK: - Static rasterization (MetalPetal unified render path)
+
+    /// Returns a CALayer of the title card in its fully-visible state,
+    /// suitable for rasterization via UIGraphicsImageRenderer. No
+    /// CAAnimations attached — the MetalPetal compositor owns
+    /// fade-in / fade-out via Overlay.alphaAt(outputTime:).
+    static func staticTitleLayer(size: CGSize,
+                                 spec: TitleCardSpec) -> CALayer {
+        makeTitleCardLayer(size: size,
+                           spec: spec,
+                           startSeconds: 0,
+                           duration: TitleCardSpec.duration,
+                           animated: false)
+    }
+
+    static func staticClosingLayer(size: CGSize,
+                                   spec: ClosingCardSpec) -> CALayer {
+        makeClosingCardLayer(size: size,
+                             spec: spec,
+                             startSeconds: 0,
+                             duration: ClosingCardSpec.duration,
+                             animated: false)
+    }
+
+    static func staticLowerThirdLayer(size: CGSize,
+                                      spec: LowerThirdSpec) -> CALayer {
+        makeLowerThirdLayer(size: size,
+                            spec: spec,
+                            startSeconds: 0,
+                            animated: false)
+    }
+
+    // MARK: - Legacy CoreAnimationTool overlay (no longer used by ReelComposer)
+
+    /// Build a transparent layer of `size` that holds animated title,
+    /// lower-third, and closing card sub-layers with CAAnimations.
+    /// Retained only for backward compatibility / debug; the cinematic
+    /// render path uses staticTitleLayer / staticClosingLayer /
+    /// staticLowerThirdLayer instead.
     static func buildOverlay(size: CGSize,
                              plan: EditPlan,
                              titleStart: Double,
@@ -40,14 +73,16 @@ enum TitleCardFactory {
             let layer = makeTitleCardLayer(size: size,
                                            spec: title,
                                            startSeconds: titleStart,
-                                           duration: TitleCardSpec.duration)
+                                           duration: TitleCardSpec.duration,
+                                           animated: true)
             parent.addSublayer(layer)
         }
 
         if let lower = plan.lowerThird {
             let layer = makeLowerThirdLayer(size: size,
                                             spec: lower,
-                                            startSeconds: lowerThirdStart)
+                                            startSeconds: lowerThirdStart,
+                                            animated: true)
             parent.addSublayer(layer)
         }
 
@@ -55,7 +90,8 @@ enum TitleCardFactory {
             let layer = makeClosingCardLayer(size: size,
                                              spec: closing,
                                              startSeconds: closingStart,
-                                             duration: ClosingCardSpec.duration)
+                                             duration: ClosingCardSpec.duration,
+                                             animated: true)
             parent.addSublayer(layer)
         }
 
@@ -67,7 +103,8 @@ enum TitleCardFactory {
     private static func makeTitleCardLayer(size: CGSize,
                                            spec: TitleCardSpec,
                                            startSeconds: Double,
-                                           duration: Double) -> CALayer {
+                                           duration: Double,
+                                           animated: Bool) -> CALayer {
         let host = CALayer()
         host.frame = CGRect(origin: .zero, size: size)
 
@@ -109,27 +146,30 @@ enum TitleCardFactory {
                                       yFraction: 0.56)
         host.addSublayer(secondary)
 
-        // Fade in / out.
-        host.opacity = 0
-        let fade = CAKeyframeAnimation(keyPath: "opacity")
-        fade.beginTime = startSeconds
-        fade.duration = duration
-        fade.values = [0.0, 1.0, 1.0, 0.0]
-        fade.keyTimes = [0.0, 0.15, 0.85, 1.0]
-        fade.isRemovedOnCompletion = false
-        fade.fillMode = .forwards
-        host.add(fade, forKey: "fade")
+        if animated {
+            // Fade in / out (legacy CoreAnimationTool path).
+            host.opacity = 0
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.beginTime = startSeconds
+            fade.duration = duration
+            fade.values = [0.0, 1.0, 1.0, 0.0]
+            fade.keyTimes = [0.0, 0.15, 0.85, 1.0]
+            fade.isRemovedOnCompletion = false
+            fade.fillMode = .forwards
+            host.add(fade, forKey: "fade")
 
-        // Subtle parallax: text slides up slightly during the card.
-        let slide = CABasicAnimation(keyPath: "transform.translation.y")
-        slide.beginTime = startSeconds
-        slide.duration = duration
-        slide.fromValue = size.height * 0.01
-        slide.toValue = -size.height * 0.005
-        slide.isRemovedOnCompletion = false
-        slide.fillMode = .forwards
-        primary.add(slide, forKey: "slide")
-
+            // Subtle parallax: text slides up slightly during the card.
+            let slide = CABasicAnimation(keyPath: "transform.translation.y")
+            slide.beginTime = startSeconds
+            slide.duration = duration
+            slide.fromValue = size.height * 0.01
+            slide.toValue = -size.height * 0.005
+            slide.isRemovedOnCompletion = false
+            slide.fillMode = .forwards
+            primary.add(slide, forKey: "slide")
+        }
+        // Static rasterization path leaves host opacity at the default
+        // (1.0) so a single render captures the fully-visible card.
         return host
     }
 
@@ -137,7 +177,8 @@ enum TitleCardFactory {
 
     private static func makeLowerThirdLayer(size: CGSize,
                                             spec: LowerThirdSpec,
-                                            startSeconds: Double) -> CALayer {
+                                            startSeconds: Double,
+                                            animated: Bool) -> CALayer {
         let host = CALayer()
         let height = size.height * 0.10
         host.frame = CGRect(x: 0,
@@ -177,28 +218,30 @@ enum TitleCardFactory {
                                                             height: height * 0.22))
         host.addSublayer(secondary)
 
-        // Slide in from below, hold, slide out.
-        host.opacity = 0
-        let begin = startSeconds + spec.startOffset
-        let visible = spec.visibleDuration
+        if animated {
+            // Slide in from below, hold, slide out.
+            host.opacity = 0
+            let begin = startSeconds + spec.startOffset
+            let visible = spec.visibleDuration
 
-        let slide = CAKeyframeAnimation(keyPath: "transform.translation.y")
-        slide.beginTime = begin
-        slide.duration = visible
-        slide.values = [40, 0, 0, 40]
-        slide.keyTimes = [0.0, 0.15, 0.85, 1.0]
-        slide.isRemovedOnCompletion = false
-        slide.fillMode = .forwards
-        host.add(slide, forKey: "slide")
+            let slide = CAKeyframeAnimation(keyPath: "transform.translation.y")
+            slide.beginTime = begin
+            slide.duration = visible
+            slide.values = [40, 0, 0, 40]
+            slide.keyTimes = [0.0, 0.15, 0.85, 1.0]
+            slide.isRemovedOnCompletion = false
+            slide.fillMode = .forwards
+            host.add(slide, forKey: "slide")
 
-        let fade = CAKeyframeAnimation(keyPath: "opacity")
-        fade.beginTime = begin
-        fade.duration = visible
-        fade.values = [0.0, 1.0, 1.0, 0.0]
-        fade.keyTimes = [0.0, 0.18, 0.82, 1.0]
-        fade.isRemovedOnCompletion = false
-        fade.fillMode = .forwards
-        host.add(fade, forKey: "fade")
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.beginTime = begin
+            fade.duration = visible
+            fade.values = [0.0, 1.0, 1.0, 0.0]
+            fade.keyTimes = [0.0, 0.18, 0.82, 1.0]
+            fade.isRemovedOnCompletion = false
+            fade.fillMode = .forwards
+            host.add(fade, forKey: "fade")
+        }
         return host
     }
 
@@ -207,7 +250,8 @@ enum TitleCardFactory {
     private static func makeClosingCardLayer(size: CGSize,
                                              spec: ClosingCardSpec,
                                              startSeconds: Double,
-                                             duration: Double) -> CALayer {
+                                             duration: Double,
+                                             animated: Bool) -> CALayer {
         let host = CALayer()
         host.frame = CGRect(origin: .zero, size: size)
 
@@ -232,15 +276,17 @@ enum TitleCardFactory {
                                       yFraction: 0.55)
         host.addSublayer(secondary)
 
-        host.opacity = 0
-        let fade = CAKeyframeAnimation(keyPath: "opacity")
-        fade.beginTime = startSeconds
-        fade.duration = duration
-        fade.values = [0.0, 1.0, 1.0]
-        fade.keyTimes = [0.0, 0.3, 1.0]
-        fade.isRemovedOnCompletion = false
-        fade.fillMode = .forwards
-        host.add(fade, forKey: "fade")
+        if animated {
+            host.opacity = 0
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.beginTime = startSeconds
+            fade.duration = duration
+            fade.values = [0.0, 1.0, 1.0]
+            fade.keyTimes = [0.0, 0.3, 1.0]
+            fade.isRemovedOnCompletion = false
+            fade.fillMode = .forwards
+            host.add(fade, forKey: "fade")
+        }
         return host
     }
 

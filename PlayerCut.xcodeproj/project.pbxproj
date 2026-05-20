@@ -10,7 +10,6 @@
 		028778EE99CF1DCC3B47DD56 /* AssistedTierView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4FA49C3F7E825D76B782BFA /* AssistedTierView.swift */; };
 		044E3F26F254BBF88FC025F0 /* PipelineOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3EADFF688E91ADCEBE5E4BC /* PipelineOrchestrator.swift */; };
 		060932B18D1FBAE3BDB8CFE3 /* GameDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B942A1811EDCD3B97ADF0516 /* GameDetailView.swift */; };
-		088B8C7B07D966002EDE97B2 /* CinematicCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E260C61C75F93E900DCD375E /* CinematicCompositor.swift */; };
 		108D78DF27B4BE582DE0E1A5 /* BrightnessKeeper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E8ADD22EC18B0C3766FC8A6 /* BrightnessKeeper.swift */; };
 		1B4AF7397EF17D55F656B42E /* ThermalAndPowerMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0ADF5A3115D99CB37242A897 /* ThermalAndPowerMonitor.swift */; };
 		1C48996C7F483E9693707056 /* PixelBufferPool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C24C5163D5195F4DEDE1C1 /* PixelBufferPool.swift */; };
@@ -44,6 +43,7 @@
 		96992BACDFBD071633EAFE99 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3B1357CF532FAF1C646A95C /* PaywallView.swift */; };
 		973D37FB0B8590D6F3869DDA /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36946E4469D60B7F569114E3 /* Storage.swift */; };
 		98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */; };
+		99CD55CC54FB7CD35A0ADC5C /* MetalPetal in Frameworks */ = {isa = PBXBuildFile; productRef = B7C7E0E16EA902DC894D7AA9 /* MetalPetal */; };
 		9BD893A163C8F863EDB1C129 /* EditPlanBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0DF7EAB0BC523AAFD00A41C /* EditPlanBuilder.swift */; };
 		9CB02794E9FDA8DE11CFE335 /* PlayerCutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7497571612E03DE355B52CD3 /* PlayerCutUITests.swift */; };
 		A5BFF6417DDFD519FF73189C /* LUTFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46CCE07A6E2B577DADAF5544 /* LUTFactory.swift */; };
@@ -54,8 +54,10 @@
 		BDB2E933B46DDE3FF5DC5B1F /* JerseyOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7F1E1FE1AD12D18BD49B744 /* JerseyOCR.swift */; };
 		C64DC90B62B7DE166E378DFE /* CompositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F4A4B71D8E971A80AF66723 /* CompositionTests.swift */; };
 		C9884D22FDD42935BA622E96 /* EvaluationHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = B99F55F63E923EEF3B3AC8B4 /* EvaluationHarness.swift */; };
+		CAAE05117AD58B62C7E77600 /* ETAEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEA1F057C200562440C24D18 /* ETAEstimator.swift */; };
 		D22548D9D37ACB6C5E6F1323 /* EnrollmentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D749DFAEDD43402C90FC8DCD /* EnrollmentViewModel.swift */; };
 		D2DB86DF3625A5D8226838F3 /* DeviceCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF92EE722574193DFC45FD7 /* DeviceCapabilities.swift */; };
+		D79DD14CD5848001DA281836 /* MetalPetalCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D013E23F01E91D1ECCB2565 /* MetalPetalCompositor.swift */; };
 		DB19202F0F7C740BCF51A698 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D00ECD5C55F39FB0B691F9 /* DiagnosticsView.swift */; };
 		EFBC32E70A4BB555DFE6A0DA /* EditPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B433A8F90D06B46CD63FC521 /* EditPlan.swift */; };
 		F9987A9CD6E4B62E403FF3D9 /* PermissionsPrimerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E4E0BCE84AA1C371A675620 /* PermissionsPrimerView.swift */; };
@@ -88,6 +90,7 @@
 		1E8ADD22EC18B0C3766FC8A6 /* BrightnessKeeper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrightnessKeeper.swift; sourceTree = "<group>"; };
 		26C24C5163D5195F4DEDE1C1 /* PixelBufferPool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PixelBufferPool.swift; sourceTree = "<group>"; };
 		292137F51062D45078631B9C /* PricingModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PricingModel.swift; sourceTree = "<group>"; };
+		2D013E23F01E91D1ECCB2565 /* MetalPetalCompositor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalPetalCompositor.swift; sourceTree = "<group>"; };
 		2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelComposer.swift; sourceTree = "<group>"; };
 		3005B7F01FC9B5D7223D127F /* PlayerCut.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PlayerCut.entitlements; sourceTree = "<group>"; };
 		36946E4469D60B7F569114E3 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
@@ -117,6 +120,7 @@
 		A18434B84D8D05760F638876 /* Accessory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Accessory.swift; sourceTree = "<group>"; };
 		A4FA49C3F7E825D76B782BFA /* AssistedTierView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistedTierView.swift; sourceTree = "<group>"; };
 		AE892148703051040369F4C6 /* PlayerCutTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlayerCutTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AEA1F057C200562440C24D18 /* ETAEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ETAEstimator.swift; sourceTree = "<group>"; };
 		B24D4CA15A14D5F147D77A85 /* CaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureView.swift; sourceTree = "<group>"; };
 		B4308B6B004B4F6FD5EA08C6 /* PhotosLibraryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryService.swift; sourceTree = "<group>"; };
 		B433A8F90D06B46CD63FC521 /* EditPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditPlan.swift; sourceTree = "<group>"; };
@@ -135,8 +139,18 @@
 		DBA115F6E9FA792435474899 /* PoseSignal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PoseSignal.swift; sourceTree = "<group>"; };
 		DE476586888DDD7EBAF974F7 /* HighlightRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightRanker.swift; sourceTree = "<group>"; };
 		E0DF7EAB0BC523AAFD00A41C /* EditPlanBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditPlanBuilder.swift; sourceTree = "<group>"; };
-		E260C61C75F93E900DCD375E /* CinematicCompositor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CinematicCompositor.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		43870309C91B75BD8735930E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				99CD55CC54FB7CD35A0ADC5C /* MetalPetal in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		040510C1D500D87A3432FA78 /* Performance */ = {
@@ -171,11 +185,12 @@
 		2CBB61FEF264F3A88FC5DB10 /* Composition */ = {
 			isa = PBXGroup;
 			children = (
-				E260C61C75F93E900DCD375E /* CinematicCompositor.swift */,
 				89BB15539399A68558E69DBD /* DeviceClass.swift */,
 				B433A8F90D06B46CD63FC521 /* EditPlan.swift */,
 				E0DF7EAB0BC523AAFD00A41C /* EditPlanBuilder.swift */,
+				AEA1F057C200562440C24D18 /* ETAEstimator.swift */,
 				46CCE07A6E2B577DADAF5544 /* LUTFactory.swift */,
+				2D013E23F01E91D1ECCB2565 /* MetalPetalCompositor.swift */,
 				B4308B6B004B4F6FD5EA08C6 /* PhotosLibraryService.swift */,
 				2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */,
 				850D3F1C14884A3D3A785424 /* TitleCardFactory.swift */,
@@ -427,6 +442,7 @@
 			buildPhases = (
 				2108638A71EECB1C28032E8C /* Sources */,
 				B3937BEC31B1909211B9152D /* Resources */,
+				43870309C91B75BD8735930E /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -434,6 +450,7 @@
 			);
 			name = PlayerCut;
 			packageProductDependencies = (
+				B7C7E0E16EA902DC894D7AA9 /* MetalPetal */,
 			);
 			productName = PlayerCut;
 			productReference = 77C451731CCFC9AEE7E5CE22 /* PlayerCut.app */;
@@ -503,6 +520,9 @@
 			);
 			mainGroup = 48044FF11BD3C211C38312C7;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				21CF88163C3C4CB5D1DCBE8D /* XCRemoteSwiftPackageReference "MetalPetal" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C87A884AA742780845570678 /* Products */;
 			projectDirPath = "";
@@ -547,7 +567,6 @@
 				108D78DF27B4BE582DE0E1A5 /* BrightnessKeeper.swift in Sources */,
 				6B862432BBFE6E43C60E42A4 /* ByteTracker.swift in Sources */,
 				95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */,
-				088B8C7B07D966002EDE97B2 /* CinematicCompositor.swift in Sources */,
 				4E829B668CF908CA7303BCF1 /* CompilationOrchestrator.swift in Sources */,
 				7C08D25A7F609A69A3D0A049 /* CompilationView.swift in Sources */,
 				47564E71FFC18A092E06FD93 /* CoreModels.swift in Sources */,
@@ -555,6 +574,7 @@
 				3B116C589A57AA4058008133 /* DeviceClass.swift in Sources */,
 				2BEDCCAC18BE9C3410B7C192 /* DiagnosticsStore.swift in Sources */,
 				DB19202F0F7C740BCF51A698 /* DiagnosticsView.swift in Sources */,
+				CAAE05117AD58B62C7E77600 /* ETAEstimator.swift in Sources */,
 				EFBC32E70A4BB555DFE6A0DA /* EditPlan.swift in Sources */,
 				9BD893A163C8F863EDB1C129 /* EditPlanBuilder.swift in Sources */,
 				D22548D9D37ACB6C5E6F1323 /* EnrollmentViewModel.swift in Sources */,
@@ -567,6 +587,7 @@
 				BDB2E933B46DDE3FF5DC5B1F /* JerseyOCR.swift in Sources */,
 				A5BFF6417DDFD519FF73189C /* LUTFactory.swift in Sources */,
 				5EB45B86F5AF7896651CC407 /* LabeledCorpus.swift in Sources */,
+				D79DD14CD5848001DA281836 /* MetalPetalCompositor.swift in Sources */,
 				590C2FD54A568CE9A0F3CD5D /* MountDetector.swift in Sources */,
 				96992BACDFBD071633EAFE99 /* PaywallView.swift in Sources */,
 				F9987A9CD6E4B62E403FF3D9 /* PermissionsPrimerView.swift in Sources */,
@@ -890,6 +911,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		21CF88163C3C4CB5D1DCBE8D /* XCRemoteSwiftPackageReference "MetalPetal" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/MetalPetal/MetalPetal";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.25.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B7C7E0E16EA902DC894D7AA9 /* MetalPetal */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 21CF88163C3C4CB5D1DCBE8D /* XCRemoteSwiftPackageReference "MetalPetal" */;
+			productName = MetalPetal;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 43076935DA8B4A669C4CFC47 /* Project object */;
 }

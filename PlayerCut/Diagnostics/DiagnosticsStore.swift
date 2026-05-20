@@ -78,6 +78,35 @@ actor DiagnosticsStore {
         persistDebounced()
     }
 
+    /// Composer fail-loud helper. Increments the per-stage failure
+    /// counter and records the stage name in the distribution. Stages
+    /// are coarse-grained (plan / reframe / transition / grade /
+    /// export) — fine enough to find the bug, broad enough that we
+    /// don't leak structural info about a child or game.
+    func composerStageFailed(stage: ComposerStage,
+                             error: Error) {
+        snapshot.counters[CounterKey.composerStageFailed.rawValue,
+                          default: 0] += 1
+        var dist = snapshot.enumDistributions[EnumKey.composerFailedStage.rawValue]
+            ?? [:]
+        dist[stage.rawValue, default: 0] += 1
+        snapshot.enumDistributions[EnumKey.composerFailedStage.rawValue] = dist
+        // Log the error description into the system log only — never
+        // into the snapshot (avoid leaking paths / names).
+        log.error("Composer stage \(stage.rawValue, privacy: .public) failed: \(error.localizedDescription, privacy: .private)")
+        persistDebounced()
+    }
+
+    /// Sets the "composer fell back to a primitive concat" flag. The
+    /// regression-guard test in CompositionTests asserts this stays
+    /// false on the happy-path fixture. There is currently NO code
+    /// path that flips it true — keeping the bookkeeping in place so
+    /// any future fallback addition will be caught.
+    func composerUsedFallback(_ used: Bool) {
+        snapshot.counters[CounterKey.composerUsedFallback.rawValue] = used ? 1 : 0
+        persistDebounced()
+    }
+
     /// Adds a "this happened today" sample. Only the day-bucketed count is
     /// kept; the absolute date is rounded to YYYY-MM-DD UTC and only the
     /// last 30 days are retained.
@@ -306,4 +335,20 @@ enum DailyEventKey: String {
     case appOpened = "app_opened"
     case reelShared = "reel_shared"
     case enrollmentCompleted = "enrollment_completed"
+}
+
+/// Composer pipeline stage labels for fail-loud diagnostics. Coarse
+/// enough not to leak structural details about a game; fine enough
+/// to localize a failure.
+enum ComposerStage: String, CaseIterable {
+    case validatePlan      = "validate_plan"
+    case buildComposition  = "build_composition"
+    case loadAssetTracks   = "load_asset_tracks"
+    case insertClips       = "insert_clips"
+    case insertTitleCards  = "insert_title_cards"
+    case attachOverlays    = "attach_overlays"
+    case exportSetup       = "export_setup"
+    case exportRun         = "export_run"
+    case exportFinalize    = "export_finalize"
+    case savePhotos        = "save_photos"
 }

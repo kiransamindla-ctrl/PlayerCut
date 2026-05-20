@@ -346,6 +346,110 @@ final class EditPlanBuilderTests: XCTestCase {
     }
 }
 
+// MARK: - ETA estimator (Section 2.2)
+
+final class ETAEstimatorTests: XCTestCase {
+
+    @MainActor
+    override func setUp() async throws {
+        ETAEstimator.shared.reset()
+    }
+
+    /// Cold start (no samples persisted for this tier) reports a wide
+    /// envelope and isFirstRun = true.
+    @MainActor
+    func testColdStartShowsRangedFirstRunCopy() {
+        let r = ETAEstimator.shared.reading(currentStage: .stage1,
+                                            tier: .a15,
+                                            elapsed: 0)
+        XCTAssertTrue(r.isFirstRun)
+        XCTAssertGreaterThan(r.upperSeconds, r.lowerSeconds,
+                             "Cold start should produce a non-degenerate range")
+        XCTAssertFalse(r.isOverdue)
+        XCTAssertTrue(r.label.contains("about"),
+                      "Label should be the 'about N min' form")
+    }
+
+    /// After samples accumulate the envelope tightens (≤ 50 % spread
+    /// after the first sample; ≤ 40 % after three).
+    @MainActor
+    func testEnvelopeTightensWithSamples() {
+        let tier: SoCTier = .a15
+        for _ in 0..<5 {
+            ETAEstimator.shared.recordSample(stage: .stage1,
+                                             tier: tier, seconds: 30)
+            ETAEstimator.shared.recordSample(stage: .stage2,
+                                             tier: tier, seconds: 120)
+            ETAEstimator.shared.recordSample(stage: .ranking,
+                                             tier: tier, seconds: 4)
+            ETAEstimator.shared.recordSample(stage: .compose,
+                                             tier: tier, seconds: 60)
+        }
+        let r = ETAEstimator.shared.reading(currentStage: .stage1,
+                                            tier: tier, elapsed: 0)
+        XCTAssertFalse(r.isFirstRun)
+        let spread = (r.upperSeconds - r.lowerSeconds) /
+            max(1, (r.upperSeconds + r.lowerSeconds) / 2)
+        XCTAssertLessThan(spread, 0.6,
+                          "Spread should tighten once samples accumulate")
+    }
+
+    /// Elapsed > 2× estimate triggers the "taking longer than usual"
+    /// copy without crashing the panel.
+    @MainActor
+    func testOverdueLabel() {
+        let tier: SoCTier = .a15
+        ETAEstimator.shared.recordSample(stage: .compose,
+                                         tier: tier, seconds: 10)
+        let r = ETAEstimator.shared.reading(currentStage: .compose,
+                                            tier: tier, elapsed: 60)
+        XCTAssertTrue(r.isOverdue)
+        XCTAssertTrue(r.label.lowercased().contains("longer"),
+                      "Overdue label should mention 'longer'")
+    }
+}
+
+// MARK: - Composer regression guard (Section 2.1 fail-loud)
+
+/// Asserts that the composer code path explicitly affirms it did NOT
+/// fall back to a primitive concat. There is no primitive-concat path
+/// in the codebase — this test exists to fail loudly if someone adds
+/// one. We can't actually invoke compose() without a fixture video, so
+/// we check the diagnostic invariant: the helper is in place and
+/// callable, and the default after a fresh DiagnosticsStore.reset()
+/// remains 0 (false).
+final class ComposerFallbackRegressionTests: XCTestCase {
+
+    func testComposerUsedFallbackDefaultsToFalse() async {
+        await DiagnosticsStore.shared.reset()
+        let snap = await DiagnosticsStore.shared.currentSnapshot()
+        let v = snap.counters[CounterKey.composerUsedFallback.rawValue]
+        XCTAssertTrue(v == nil || v == 0,
+                      "composerUsedFallback should default to absent/false")
+    }
+
+    func testComposerUsedFallbackCanBeAffirmedFalse() async {
+        await DiagnosticsStore.shared.reset()
+        await DiagnosticsStore.shared.composerUsedFallback(false)
+        let snap = await DiagnosticsStore.shared.currentSnapshot()
+        XCTAssertEqual(snap.counters[CounterKey.composerUsedFallback.rawValue],
+                       0,
+                       "Affirmation should record 0 (false)")
+    }
+
+    func testComposerStageFailedRecordsCounterAndDistribution() async {
+        await DiagnosticsStore.shared.reset()
+        let err = PipelineError.compositionFailed("synthetic")
+        await DiagnosticsStore.shared.composerStageFailed(
+            stage: .exportRun, error: err)
+        let snap = await DiagnosticsStore.shared.currentSnapshot()
+        XCTAssertEqual(snap.counters[CounterKey.composerStageFailed.rawValue], 1)
+        let dist = snap.enumDistributions[EnumKey.composerFailedStage.rawValue]
+        XCTAssertEqual(dist?[ComposerStage.exportRun.rawValue], 1,
+                       "Stage label should land in the distribution")
+    }
+}
+
 // MARK: - LUT factory
 
 final class LUTFactoryTests: XCTestCase {

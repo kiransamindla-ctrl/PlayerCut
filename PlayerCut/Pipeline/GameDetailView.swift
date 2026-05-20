@@ -37,6 +37,13 @@ struct GameDetailView: View {
     /// return from background.
     @State private var avPlayer: AVPlayer?
     @State private var playerURL: URL?
+    /// Drives the ETA panel's per-second refresh while a game is
+    /// processing. Separate from the main 2-second refreshTimer so
+    /// the countdown feels live.
+    @State private var etaTick: Date = Date()
+    private let etaTimer = Timer.publish(every: 1,
+                                         on: .main,
+                                         in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -55,6 +62,7 @@ struct GameDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .task { await reload() }
         .onReceive(refreshTimer) { _ in Task { await reload() } }
+        .onReceive(etaTimer) { now in etaTick = now }
         .onChange(of: scenePhase) { _, new in
             // Pause the player when we leave foreground; resume when we
             // return. Without this, returning from Photos lands on a
@@ -257,6 +265,7 @@ struct GameDetailView: View {
                 .tracking(1)
             StadiumLightBar(stage: stageIndex(game.status))
                 .frame(height: 28)
+            etaPanel(for: game)
             Text("Started \(game.startedAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.pcCaption)
                 .foregroundStyle(Theme.textSecondary)
@@ -281,6 +290,39 @@ struct GameDetailView: View {
             Spacer()
         }
         .padding(20)
+    }
+
+    /// Composing-screen ETA panel. Shows "Composing reel — about N min
+    /// remaining" with a determinate bar. First-time-on-device runs
+    /// surface a wider range; subsequent runs (≥3 samples per stage
+    /// for this SoC tier) tighten to ±20 %.
+    @ViewBuilder
+    private func etaPanel(for game: GameSession) -> some View {
+        if let stage = etaStage(for: game.status) {
+            let elapsed = max(0, etaTick.timeIntervalSince(game.startedAt))
+            let reading = ETAEstimator.shared.reading(
+                currentStage: stage,
+                tier: DeviceCapabilities.currentTier(),
+                elapsed: elapsed)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(reading.label)
+                    .font(.pcCaption)
+                    .foregroundStyle(reading.isOverdue
+                                     ? Theme.accent : Theme.textSecondary)
+                ProgressView(value: min(1, max(0, reading.progress)))
+                    .progressViewStyle(.linear)
+                    .tint(Theme.accent)
+            }
+        }
+    }
+
+    private func etaStage(for status: GameStatus) -> ETAEstimator.Stage? {
+        switch status {
+        case .stage1Running: return .stage1
+        case .stage2Running: return .stage2
+        case .composing:     return .compose
+        default:             return nil
+        }
     }
 
     /// Maps a GameStatus to a 0-based stage index for the progress bar.

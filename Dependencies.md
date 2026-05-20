@@ -7,7 +7,7 @@ Apple-native path is insufficient.
 
 | Name | Type | License | Source URL | Date added | Reason Apple-native is insufficient |
 |------|------|---------|------------|------------|-------------------------------------|
-| _(none yet)_ | — | — | — | — | — |
+| MetalPetal | Swift package (SPM) | MIT | https://github.com/MetalPetal/MetalPetal (v1.25.2) | 2026-05-20 | The cinematic compositor needs a unified GPU render path that draws clips, A/B transitions, color grade, and rasterized title/lower-third overlays in one pass. Mixing AVVideoCompositionCoreAnimationTool with a custom CIContext compositor is an Apple-API conflict that broke export on real devices (see Section 2.1 root cause). MetalPetal's `MTIImage` graph + `MTIContext` give us one Metal-backed render that draws every output frame without the CoreAnimationTool detour. |
 
 ## Pending / planned additions
 

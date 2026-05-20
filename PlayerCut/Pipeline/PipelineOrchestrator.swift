@@ -109,9 +109,16 @@ actor PipelineOrchestrator {
 
                     let stage1Start = Date()
                     let stage1Result = try await self.stage1.detect(in: game)
+                    let stage1Elapsed = Date().timeIntervalSince(stage1Start)
                     await DiagnosticsStore.shared.recordDuration(
                         .stage1,
-                        seconds: Date().timeIntervalSince(stage1Start))
+                        seconds: stage1Elapsed)
+                    await MainActor.run {
+                        ETAEstimator.shared.recordSample(
+                            stage: .stage1,
+                            tier: DeviceCapabilities.currentTier(),
+                            seconds: stage1Elapsed)
+                    }
                     game.stage1Result = stage1Result
                     try await self.store.upsert(game)
                     continuation.yield(.stage1Completed(
@@ -128,9 +135,16 @@ actor PipelineOrchestrator {
                         in: game,
                         candidates: stage1Result.candidates,
                         enrollment: player)
+                    let stage2Elapsed = Date().timeIntervalSince(stage2Start)
                     await DiagnosticsStore.shared.recordDuration(
                         .stage2,
-                        seconds: Date().timeIntervalSince(stage2Start))
+                        seconds: stage2Elapsed)
+                    await MainActor.run {
+                        ETAEstimator.shared.recordSample(
+                            stage: .stage2,
+                            tier: DeviceCapabilities.currentTier(),
+                            seconds: stage2Elapsed)
+                    }
                     game.stage2Result = stage2Result
                     try await self.store.upsert(game)
                     continuation.yield(.stage2Completed(
@@ -231,6 +245,12 @@ actor PipelineOrchestrator {
                     await DiagnosticsStore.shared.recordDuration(
                         .composeExport,
                         seconds: composeWall)
+                    await MainActor.run {
+                        ETAEstimator.shared.recordSample(
+                            stage: .compose,
+                            tier: DeviceCapabilities.currentTier(),
+                            seconds: composeWall)
+                    }
                     game.localReelURL = composeResult.localURL
                     game.savedToPhotos = composeResult.savedToPhotos
                     game.exportedReelAssetId = composeResult.assetId
