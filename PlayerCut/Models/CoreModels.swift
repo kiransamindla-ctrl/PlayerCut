@@ -267,6 +267,9 @@ struct GameSession: Codable, Identifiable {
     var sceneType: SceneType = .outdoor
     /// nil → use the player's `outputAspect`. Per-game override.
     var outputAspectOverride: OutputAspect?
+    /// Which ranker tier produced this game's reel. nil until the
+    /// pipeline reaches the ranker.
+    var rankerTierUsed: RankerTier?
 
     init(id: UUID,
          playerId: UUID,
@@ -283,7 +286,8 @@ struct GameSession: Codable, Identifiable {
          triggerSource: TriggerSource = .manual,
          reelLengthOverride: ReelLength? = nil,
          sceneType: SceneType = .outdoor,
-         outputAspectOverride: OutputAspect? = nil) {
+         outputAspectOverride: OutputAspect? = nil,
+         rankerTierUsed: RankerTier? = nil) {
         self.id = id
         self.playerId = playerId
         self.sport = sport
@@ -300,6 +304,7 @@ struct GameSession: Codable, Identifiable {
         self.reelLengthOverride = reelLengthOverride
         self.sceneType = sceneType
         self.outputAspectOverride = outputAspectOverride
+        self.rankerTierUsed = rankerTierUsed
     }
 
     // Custom decode for back-compat across schema migrations:
@@ -324,6 +329,8 @@ struct GameSession: Codable, Identifiable {
         sceneType = try c.decodeIfPresent(SceneType.self, forKey: .sceneType) ?? .outdoor
         outputAspectOverride = try c.decodeIfPresent(OutputAspect.self,
                                                      forKey: .outputAspectOverride)
+        rankerTierUsed = try c.decodeIfPresent(RankerTier.self,
+                                               forKey: .rankerTierUsed)
     }
 }
 
@@ -376,6 +383,16 @@ struct Stage2Result: Codable {
 }
 
 // MARK: - Errors
+
+/// Which ranker tier produced the reel. Tier 1 is the normal path
+/// (strong signals); Tier 2 lowers thresholds and uses relative
+/// scoring (quiet / solo-practice); Tier 3 is an evenly-sampled
+/// montage from the raw video (last-resort, guarantees a reel).
+enum RankerTier: Int, Codable {
+    case normal = 1
+    case weakSignals = 2
+    case montageFallback = 3
+}
 
 enum PipelineError: Error, LocalizedError {
     case captureFailed(String)

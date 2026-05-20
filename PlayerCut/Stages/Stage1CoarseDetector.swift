@@ -80,11 +80,12 @@ actor Stage1CoarseDetector {
             log.info("Stage 1 fallback: produced \(trimmed.count) candidates")
         }
 
-        // Only truly empty videos fail. Anything ≥1 candidate is honored;
-        // downstream (HighlightRanker) handles short clip lists gracefully.
+        // Never-reject contract: an empty candidate list is a valid
+        // Stage 1 result. HighlightRanker's Tier 3 will fall back to
+        // an evenly-sampled montage from the raw video so the user
+        // always gets a reel, even on black/silent footage.
         if trimmed.isEmpty {
-            log.warning("Stage 1: no candidates after retry — video appears empty")
-            throw PipelineError.insufficientCandidates(found: 0, needed: 1)
+            log.warning("Stage 1: no candidates after retry — returning empty result, ranker Tier 3 will montage")
         }
 
         log.info("Stage 1 done: \(trimmed.count) candidates (audio=\(audioWindows.count), motion=\(motionWindows.count))")

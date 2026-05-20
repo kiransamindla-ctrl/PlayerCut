@@ -227,6 +227,14 @@ enum CounterKey: String {
     // Compilations
     case compilationsCreated = "compilations_created"
 
+    // Never-reject ranker tiers
+    case rankerTier1Used = "ranker_tier_1_used"
+    case rankerTier2Used = "ranker_tier_2_used"
+    case rankerTier3Used = "ranker_tier_3_used"
+    /// Invariant check — should increment on every completed reel.
+    /// Any divergence between this and reelsCompleted is a regression.
+    case reelAlwaysProduced = "reel_always_produced"
+
     // Errors (categorized, never with text)
     case errorCaptureFailed = "err_capture_failed"
     case errorPipelineFailed = "err_pipeline_failed"

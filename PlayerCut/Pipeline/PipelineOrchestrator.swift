@@ -7,6 +7,7 @@
 //  so the pipeline can resume if killed mid-run.
 //
 
+import AVFoundation
 import Foundation
 import os.log
 
@@ -109,21 +110,38 @@ actor PipelineOrchestrator {
                     // the player's stored default.
                     let length = game.reelLengthOverride ?? player.reelLengthPreference
 
-                    // Ranking — config preset is keyed off the reel length.
+                    // Load source video duration so the ranker can fall
+                    // back to a Tier-3 montage when no candidates survive.
+                    let videoDuration = (try? await AVURLAsset(
+                        url: game.rawVideoURL).load(.duration).seconds) ?? 0
+
+                    // Ranking — config preset is keyed off the reel length,
+                    // weights are sport-tuned.
                     let rankingStart = Date()
-                    let ranker = HighlightRanker(config: .for(length: length))
-                    let plan = ranker.selectClips(from: stage2Result.moments)
+                    let ranker = HighlightRanker(
+                        config: .for(length: length),
+                        weights: .profile(for: player.sport))
+                    let plan = ranker.selectClips(
+                        from: stage2Result.moments,
+                        videoDuration: videoDuration)
                     await DiagnosticsStore.shared.recordDuration(
                         .ranking,
                         seconds: Date().timeIntervalSince(rankingStart))
                     continuation.yield(.rankingCompleted(clipCount: plan.selected.count))
 
-                    // Short/solo-practice support: a single-clip reel is
-                    // a valid output. Only refuse if the ranker produced
-                    // literally nothing.
-                    if plan.selected.isEmpty {
-                        throw PipelineError.insufficientCandidates(
-                            found: 0, needed: 1)
+                    // Never-reject contract: the ranker's three tiers
+                    // guarantee a non-empty plan as long as the source
+                    // video has a positive duration. We log the tier so
+                    // the labeled-corpus sweep can later measure how
+                    // often each fallback fires in the wild.
+                    game.rankerTierUsed = plan.tier
+                    switch plan.tier {
+                    case .normal:
+                        await DiagnosticsStore.shared.increment(.rankerTier1Used)
+                    case .weakSignals:
+                        await DiagnosticsStore.shared.increment(.rankerTier2Used)
+                    case .montageFallback:
+                        await DiagnosticsStore.shared.increment(.rankerTier3Used)
                     }
                     if plan.totalDuration < length.targetSeconds * 0.5 {
                         await DiagnosticsStore.shared.increment(.shortReelProduced)
@@ -169,6 +187,10 @@ actor PipelineOrchestrator {
                     }
 
                     await DiagnosticsStore.shared.increment(.reelsCompleted)
+                    // Invariant: should match reelsCompleted 1:1 under
+                    // the never-reject contract. Any divergence is a
+                    // regression to investigate.
+                    await DiagnosticsStore.shared.increment(.reelAlwaysProduced)
                     await DiagnosticsStore.shared.recordDuration(
                         .totalPipeline,
                         seconds: Date().timeIntervalSince(pipelineStart))

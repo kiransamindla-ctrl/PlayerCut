@@ -199,9 +199,14 @@ final class HighlightRankerTests: XCTestCase {
     }
 
     func testExceptionalScoreGetsLongClip() {
-        // One exceptional moment (score ≥ 0.85 → 8s clip) plus enough
-        // separated normal-scoring moments to fill the rest.
-        var moments = [makeMoment(center: 100, composite: 0.95)]
+        // One exceptional moment plus enough separated normal-scoring
+        // moments to fill the rest. The 3-tier ranker recomputes the
+        // composite from the six-term weights — a raw input of 0.95
+        // recomposes below the 0.85 exceptional threshold because
+        // audio/motion defaults pull it down. Use 1.0 so the
+        // recomposition lands at 0.85 and the exceptional clip-length
+        // branch triggers.
+        var moments = [makeMoment(center: 100, composite: 1.0)]
         moments += (1..<15).map { i in
             makeMoment(center: 100 + Double(i) * 40, composite: 0.5)
         }
@@ -232,6 +237,82 @@ final class HighlightRankerTests: XCTestCase {
         let starts = plan.selected.map { $0.clipStart }
         XCTAssertEqual(starts, starts.sorted(),
                        "Short-clip path must still order chronologically")
+    }
+
+    // MARK: - Never-reject 3-tier ranker
+
+    /// Tier 1: composites above 0.45 → diversity-respecting selection,
+    /// tier should be .normal.
+    func testTier1NormalPath() {
+        let moments = (0..<10).map { i in
+            makeMoment(center: 60 + Double(i) * 60,
+                       composite: 0.55 + Float(i) * 0.02)
+        }
+        let plan = HighlightRanker().selectClips(from: moments,
+                                                 videoDuration: 800)
+        XCTAssertEqual(plan.tier, .normal)
+        XCTAssertGreaterThan(plan.selected.count, 0)
+    }
+
+    /// Tier 2: all composites below the 0.45 floor but above 0.15 →
+    /// relaxed-threshold pass should still yield a plan.
+    func testTier2RelaxedThreshold() {
+        let moments = (0..<10).map { i in
+            makeMoment(center: 60 + Double(i) * 60,
+                       composite: 0.20 + Float(i) * 0.01)
+        }
+        let plan = HighlightRanker().selectClips(from: moments,
+                                                 videoDuration: 800)
+        XCTAssertEqual(plan.tier, .weakSignals)
+        XCTAssertGreaterThan(plan.selected.count, 0)
+    }
+
+    /// Tier 2 relative-ranking branch: every composite below the
+    /// 0.15 floor → ranker normalizes and still picks the best
+    /// available.
+    func testTier2RelativeRanking() {
+        let moments = (0..<8).map { i in
+            makeMoment(center: 60 + Double(i) * 60,
+                       composite: Float(i) * 0.01)  // all in [0, 0.07]
+        }
+        let plan = HighlightRanker().selectClips(from: moments,
+                                                 videoDuration: 800)
+        XCTAssertEqual(plan.tier, .weakSignals,
+                       "Below-floor composites should still resolve via relative ranking")
+        XCTAssertGreaterThan(plan.selected.count, 0)
+    }
+
+    /// Tier 3: zero candidate moments + a positive video duration →
+    /// montage fallback produces minClips evenly-sampled clips.
+    func testTier3MontageFromEmptyMoments() {
+        let plan = HighlightRanker().selectClips(from: [],
+                                                 videoDuration: 600)
+        XCTAssertEqual(plan.tier, .montageFallback)
+        XCTAssertEqual(plan.selected.count, RankerConfig().minClips,
+                       "Tier 3 should sample minClips segments")
+        // Clips should be roughly evenly spaced across the timeline.
+        let starts = plan.selected.map { $0.clipStart }
+        XCTAssertEqual(starts, starts.sorted(),
+                       "Montage clips must be chronological")
+    }
+
+    /// Single strong moment → 1-clip reel from Tier 1.
+    func testSingleStrongMomentProducesOneClip() {
+        let plan = HighlightRanker().selectClips(
+            from: [makeMoment(center: 120, composite: 0.92)],
+            videoDuration: 300)
+        XCTAssertEqual(plan.tier, .normal)
+        XCTAssertEqual(plan.selected.count, 1)
+    }
+
+    /// Pure invariant: zero moments AND zero duration → empty plan,
+    /// tier still records as montageFallback so the orchestrator can
+    /// log the regression and never crash.
+    func testTier3GracefulOnEmptyEverything() {
+        let plan = HighlightRanker().selectClips(from: [],
+                                                 videoDuration: 0)
+        XCTAssertEqual(plan.tier, .montageFallback)
+        XCTAssertEqual(plan.selected.count, 0)
     }
 
     func testNormalScoreClipsRespectMaxClipDuration() {
