@@ -1,57 +1,62 @@
 //
 //  ReelComposer.swift
-//  PlayerCut
+//  PlayerCut/Composition
 //
-//  Composites the selected clips into a 9:16 vertical MP4 with crossfades,
-//  smooth player-tracked reframing, music bed, and on-screen captions.
+//  Renders an EditPlan into a finished MP4. All "taste" lives in the
+//  EditPlanBuilder; this file's job is purely to translate that plan
+//  into AVFoundation primitives:
+//
+//    - Cold open + body clips inserted via AVMutableComposition with
+//      per-segment time-range scaling (= speed ramps).
+//    - A custom CinematicCompositor on the AVMutableVideoComposition,
+//      one CinematicInstruction per rendered clip — interpolates crop
+//      keyframes, applies the LUT grade, and blends transitions.
+//    - Title + closing cards rendered into solid-black source segments
+//      with Core Animation layers attached via
+//      AVVideoCompositionCoreAnimationTool.
+//    - Music bed + game audio mix with per-clip ducking and an
+//      always-on closing fade so the reel ends clean.
 //
 
 import AVFoundation
 import CoreImage
+import QuartzCore
 import UIKit
 import os.log
 
 final class ReelComposer {
 
-    private let log = Logger(subsystem: "com.playercut.app", category: "Composer")
+    private let log = Logger(subsystem: "com.playercut.app",
+                             category: "Composer")
 
-    private let crossfade: Double = 0.3
-
-    /// 1080-class for ≤3 min reels; 720-class for 5 min so the MP4 stays
-    /// share-friendly (~150 MB at 1080p, ~50 MB at 720p). Aspect-aware:
-    /// vertical 9:16, horizontal 16:9, square 1:1 are all supported.
-    private func outputSize(for length: ReelLength,
-                            aspect: OutputAspect) -> CGSize {
-        aspect.renderSize(forLength: length)
-    }
-
-    /// Outcome of a compose+save run. The local file URL is the
-    /// canonical playback source and is always set on success;
-    /// `assetId` and `savedToPhotos` are nice-to-have signals about
-    /// what made it into the user's Photos library.
     struct Result {
-        /// Always set on success. Durable path in Documents/reels/.
         let localURL: URL
-        /// True when a copy landed in Photos (Recents at minimum).
         let savedToPhotos: Bool
-        /// PHAsset id when full access let us read it back; nil under
-        /// add-only or when Photos was denied.
         let assetId: String?
     }
 
-    func compose(plan: ReelPlan,
+    // Knobs surfaced to the orchestrator so device-class gating can
+    // turn off heavy stages on weaker hardware. See PerfProfile in
+    // EditPlanBuilder for the read side of these.
+    var enableTitleCards: Bool = true
+    var enableLowerThird: Bool = true
+    var enableClosingCard: Bool = true
+    var transitionDuration: Double = 0.45
+    var musicBedVolume: Float = 0.40        // -8.5 dB ≈ 0.376; rounded
+    var musicDuckVolume: Float = 0.08       // -22 dB ≈ 0.079; rounded
+    var gameAudioVolume: Float = 1.0
+
+    func compose(plan: EditPlan,
                  game: GameSession,
                  player: PlayerEnrollment,
-                 length: ReelLength,
-                 musicURL: URL?,
                  outputURL: URL) async throws -> Result {
 
-        let aspect = game.outputAspectOverride ?? player.outputAspect
-        let outputSize = outputSize(for: length, aspect: aspect)
         let composition = AVMutableComposition()
         let videoComposition = AVMutableVideoComposition()
-        videoComposition.renderSize = outputSize
-        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        videoComposition.renderSize = plan.output.size
+        videoComposition.frameDuration = CMTime(value: 1,
+                                                timescale: Int32(plan.output.fps))
+        videoComposition.customVideoCompositorClass = CinematicCompositor.self
 
         guard let videoTrack = composition.addMutableTrack(
             withMediaType: .video,
@@ -65,72 +70,177 @@ final class ReelComposer {
             withMediaType: .audio,
             preferredTrackID: kCMPersistentTrackID_Invalid)
 
+        // Open the source asset once and look up its primary tracks.
         let asset = AVURLAsset(url: game.rawVideoURL)
-        guard let assetVideoTrack = try await asset.loadTracks(withMediaType: .video).first else {
+        guard let assetVideoTrack = try await asset.loadTracks(
+                withMediaType: .video).first else {
             throw PipelineError.compositionFailed("Source video has no track")
         }
+        let assetAudioTrack = try? await asset.loadTracks(
+            withMediaType: .audio).first
+
+        // Build the rendered segments in order:
+        // [cold open] [title card] [body...] [closing card]
+        // For each video segment we record a (renderTimeRange, instruction)
+        // pair so the video composition's instructions array stays in
+        // strict chronological order.
 
         var insertTime = CMTime.zero
-        var instructions: [AVMutableVideoCompositionInstruction] = []
+        var instructions: [CinematicInstruction] = []
+        var audioDuckRanges: [CMTimeRange] = []
+        let stageStart = Date()
+        var firstBodyOutputStart: Double = 0
+        var lastBodyOutputEnd: Double = 0
 
-        for (index, clip) in plan.selected.enumerated() {
-            let clipDuration = CMTime(seconds: clip.duration, preferredTimescale: 600)
-            let timeRange = CMTimeRange(
-                start: CMTime(seconds: clip.clipStart, preferredTimescale: 600),
-                duration: clipDuration
-            )
-            try videoTrack.insertTimeRange(timeRange,
-                                           of: assetVideoTrack,
-                                           at: insertTime)
-            if let assetAudio = try await asset.loadTracks(withMediaType: .audio).first {
-                try audioTrack?.insertTimeRange(timeRange,
-                                                of: assetAudio,
-                                                at: insertTime)
+        // Cold open ----------------------------------------------------
+        if let cold = plan.coldOpen {
+            try insertClip(cold,
+                           composition: composition,
+                           videoTrack: videoTrack,
+                           audioTrack: audioTrack,
+                           assetVideoTrack: assetVideoTrack,
+                           assetAudioTrack: assetAudioTrack,
+                           plan: plan,
+                           at: &insertTime,
+                           instructions: &instructions,
+                           transitionInto: nil)
+        }
+
+        // Title card (solid-black source) -----------------------------
+        if enableTitleCards, plan.titleCard != nil {
+            let cardDuration = TitleCardSpec.duration
+            try insertBlackCard(duration: cardDuration,
+                                composition: composition,
+                                videoTrack: videoTrack,
+                                at: &insertTime,
+                                instructions: &instructions,
+                                plan: plan)
+        }
+
+        // Body clips ---------------------------------------------------
+        firstBodyOutputStart = insertTime.seconds
+        for (i, clip) in plan.body.enumerated() {
+            let isLast = (i == plan.body.count - 1)
+            let next: ClipPlan? = isLast ? nil : plan.body[i + 1]
+            try insertClip(clip,
+                           composition: composition,
+                           videoTrack: videoTrack,
+                           audioTrack: audioTrack,
+                           assetVideoTrack: assetVideoTrack,
+                           assetAudioTrack: assetAudioTrack,
+                           plan: plan,
+                           at: &insertTime,
+                           instructions: &instructions,
+                           transitionInto: next)
+            // Duck music whenever the game audio is high-energy.
+            if clip.energy >= 0.6 {
+                let dur = max(0.3, min(0.9, Double(clip.renderedDuration)))
+                let start = insertTime - CMTime(seconds: dur,
+                                                preferredTimescale: 600)
+                audioDuckRanges.append(
+                    CMTimeRange(start: start,
+                                duration: CMTime(seconds: dur,
+                                                 preferredTimescale: 600)))
             }
+        }
+        lastBodyOutputEnd = insertTime.seconds
 
-            // Build per-clip composition instruction with player-tracked reframe
-            let instr = makeReframeInstruction(for: clip,
-                                               sourceTrack: videoTrack,
-                                               assetTrack: assetVideoTrack,
-                                               at: insertTime,
-                                               duration: clipDuration,
-                                               outputSize: outputSize,
-                                               isFirst: index == 0,
-                                               isLast: index == plan.selected.count - 1)
-            instructions.append(instr)
-            insertTime = CMTimeAdd(insertTime, clipDuration)
+        // Closing card -------------------------------------------------
+        let closingStart = insertTime.seconds
+        if enableClosingCard, plan.closingCard != nil {
+            let cardDuration = ClosingCardSpec.duration
+            try insertBlackCard(duration: cardDuration,
+                                composition: composition,
+                                videoTrack: videoTrack,
+                                at: &insertTime,
+                                instructions: &instructions,
+                                plan: plan)
+        }
+
+        // Music bed ----------------------------------------------------
+        let totalDuration = insertTime
+        if let musicURL = plan.musicURL {
+            let music = AVURLAsset(url: musicURL)
+            if let track = try? await music.loadTracks(
+                withMediaType: .audio).first {
+                let range = CMTimeRange(start: .zero, duration: totalDuration)
+                try? musicTrack?.insertTimeRange(range,
+                                                 of: track,
+                                                 at: .zero)
+            }
         }
 
         videoComposition.instructions = instructions
+        videoComposition.customVideoCompositorClass = CinematicCompositor.self
 
-        // Music bed
-        if let musicURL {
-            let music = AVURLAsset(url: musicURL)
-            if let track = try? await music.loadTracks(withMediaType: .audio).first {
-                let totalDuration = CMTime(seconds: plan.totalDuration,
-                                           preferredTimescale: 600)
-                let range = CMTimeRange(start: .zero, duration: totalDuration)
-                try musicTrack?.insertTimeRange(range, of: track, at: .zero)
-            }
+        // Title + closing + lower-third overlays via Core Animation ----
+        if enableTitleCards || enableLowerThird || enableClosingCard {
+            let parent = CALayer()
+            parent.frame = CGRect(origin: .zero, size: plan.output.size)
+            let video = CALayer()
+            video.frame = parent.bounds
+            parent.addSublayer(video)
+
+            // titleStart = right after cold open (if any).
+            let titleStart: Double = (plan.coldOpen?.renderedDuration ?? 0)
+            // lowerThird starts inside the first body clip.
+            let lowerThirdStart = firstBodyOutputStart
+            let overlay = TitleCardFactory.buildOverlay(
+                size: plan.output.size,
+                plan: plan,
+                titleStart: titleStart,
+                lowerThirdStart: lowerThirdStart,
+                closingStart: closingStart)
+            parent.addSublayer(overlay)
+
+            videoComposition.animationTool = AVVideoCompositionCoreAnimationTool(
+                postProcessingAsVideoLayer: video,
+                in: parent)
         }
 
-        // Mix: duck music when game audio is loud
+        // Audio mix ----------------------------------------------------
         let mix = AVMutableAudioMix()
         if let audioTrack {
             let params = AVMutableAudioMixInputParameters(track: audioTrack)
-            params.setVolume(1.0, at: .zero)
+            params.setVolume(gameAudioVolume, at: .zero)
             mix.inputParameters.append(params)
         }
         if let musicTrack {
             let params = AVMutableAudioMixInputParameters(track: musicTrack)
-            params.setVolume(0.35, at: .zero)
+            // Base level, then duck around each high-energy moment, then
+            // recover. Final fade-out across the closing card.
+            params.setVolume(musicBedVolume, at: .zero)
+            for range in audioDuckRanges {
+                params.setVolumeRamp(
+                    fromStartVolume: musicBedVolume,
+                    toEndVolume: musicDuckVolume,
+                    timeRange: CMTimeRange(start: range.start,
+                                           duration: CMTime(seconds: 0.25,
+                                                            preferredTimescale: 600)))
+                params.setVolumeRamp(
+                    fromStartVolume: musicDuckVolume,
+                    toEndVolume: musicBedVolume,
+                    timeRange: CMTimeRange(start: range.end,
+                                           duration: CMTime(seconds: 0.4,
+                                                            preferredTimescale: 600)))
+            }
+            // Closing fade.
+            let fadeStart = CMTime(seconds: max(0, lastBodyOutputEnd),
+                                   preferredTimescale: 600)
+            let fadeEnd = totalDuration
+            params.setVolumeRamp(fromStartVolume: musicBedVolume,
+                                 toEndVolume: 0,
+                                 timeRange: CMTimeRange(start: fadeStart,
+                                                        end: fadeEnd))
             mix.inputParameters.append(params)
         }
 
-        // Export
+        // Export -------------------------------------------------------
+        let preset = pickExportPreset(asset: composition)
         guard let session = AVAssetExportSession(asset: composition,
-                                                 presetName: AVAssetExportPresetHighestQuality) else {
-            throw PipelineError.compositionFailed("Export session init failed")
+                                                 presetName: preset) else {
+            throw PipelineError.compositionFailed(
+                "Export session init failed for preset \(preset)")
         }
         session.outputURL = outputURL
         session.outputFileType = .mp4
@@ -140,10 +250,9 @@ final class ReelComposer {
 
         try? FileManager.default.removeItem(at: outputURL)
         await session.export()
-
         switch session.status {
         case .completed:
-            log.info("Reel exported: \(outputURL.lastPathComponent)")
+            break
         case .failed, .cancelled:
             throw PipelineError.compositionFailed(
                 session.error?.localizedDescription ?? "Export failed")
@@ -151,21 +260,17 @@ final class ReelComposer {
             throw PipelineError.compositionFailed("Export ended in unexpected state")
         }
 
-        // Belt-and-braces: confirm the file is fully flushed before
-        // declaring the reel ready. AVAssetExportSession sometimes
-        // reports `.completed` before the writer has closed the moov
-        // atom, which surfaces downstream as a zero-byte file that
-        // GameDetailView would refuse to play. Block until the file
-        // exists with non-zero size or fail loudly.
+        // Belt-and-braces: don't publish a half-written file. Confirm
+        // the writer has flushed before we hand the URL to anyone.
         let fm = FileManager.default
         var attempts = 0
         while attempts < 20 {
-            if fm.fileExists(atPath: outputURL.path) {
-                let attrs = try? fm.attributesOfItem(atPath: outputURL.path)
-                let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
-                if size > 0 { break }
+            if fm.fileExists(atPath: outputURL.path),
+               let attrs = try? fm.attributesOfItem(atPath: outputURL.path),
+               let size = (attrs[.size] as? NSNumber)?.intValue, size > 0 {
+                break
             }
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            try? await Task.sleep(nanoseconds: 100_000_000)
             attempts += 1
         }
         guard fm.fileExists(atPath: outputURL.path),
@@ -175,10 +280,8 @@ final class ReelComposer {
                 "Export reported completed but output file is missing or empty")
         }
 
-        // The local file at `outputURL` is the canonical playback
-        // source from here on. The orchestrator places it directly in
-        // Documents/reels/<id>.mp4 so we don't need to relocate.
-        // Attempt a best-effort Photos copy; non-fatal on denial.
+        log.info("Reel exported: \(outputURL.lastPathComponent, privacy: .public) (\(size) bytes) in \(Date().timeIntervalSince(stageStart), format: .fixed(precision: 2))s")
+
         let outcome = await PhotosLibraryService.saveReel(fileURL: outputURL)
         switch outcome {
         case .savedToAlbumAndRecents(let id):
@@ -190,119 +293,145 @@ final class ReelComposer {
         }
     }
 
-    // MARK: - Reframe instruction
+    // MARK: - Clip insertion (handles speed curve)
 
-    /// Produces a transform that crops the source 16:9 frame down to a 9:16
-    /// window centered on the smoothed bounding box of the player.
-    private func makeReframeInstruction(
-        for clip: SelectedClip,
-        sourceTrack: AVMutableCompositionTrack,
-        assetTrack: AVAssetTrack,
-        at startTime: CMTime,
-        duration: CMTime,
-        outputSize: CGSize,
-        isFirst: Bool,
-        isLast: Bool
-    ) -> AVMutableVideoCompositionInstruction {
+    private func insertClip(_ clip: ClipPlan,
+                            composition: AVMutableComposition,
+                            videoTrack: AVMutableCompositionTrack,
+                            audioTrack: AVMutableCompositionTrack?,
+                            assetVideoTrack: AVAssetTrack,
+                            assetAudioTrack: AVAssetTrack?,
+                            plan: EditPlan,
+                            at insertTime: inout CMTime,
+                            instructions: inout [CinematicInstruction],
+                            transitionInto next: ClipPlan?) throws {
 
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: startTime, duration: duration)
+        let segmentStart = insertTime
+        let srcDur = clip.sourceEnd - clip.sourceStart
+        guard srcDur > 0 else { return }
 
-        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: sourceTrack)
-
-        // Smooth the player's bounding box centers across the clip with a
-        // 1-D Kalman so the framing doesn't jitter.
-        let smoothed = smoothPlayerCenters(boxes: clip.moment.playerBoundingBoxes,
-                                           clipStart: clip.clipStart,
-                                           clipEnd: clip.clipEnd)
-
-        // For each smoothed center, set a transform ramp.
-        // For brevity, we set just two anchors (start and end). Production code
-        // would interpolate at 10–15 Hz across the clip.
-        let startCenter = smoothed.first ?? CGPoint(x: 0.5, y: 0.5)
-        let endCenter = smoothed.last ?? startCenter
-
-        let startTransform = transformForCenter(startCenter,
-                                                sourceSize: assetTrack.naturalSize,
-                                                outputSize: outputSize)
-        let endTransform = transformForCenter(endCenter,
-                                              sourceSize: assetTrack.naturalSize,
-                                              outputSize: outputSize)
-
-        layer.setTransformRamp(fromStart: startTransform,
-                               toEnd: endTransform,
-                               timeRange: instruction.timeRange)
-
-        // Crossfade in/out
-        if !isFirst {
-            let fadeIn = CMTimeRange(start: startTime,
-                                     duration: CMTime(seconds: crossfade,
-                                                      preferredTimescale: 600))
-            layer.setOpacityRamp(fromStartOpacity: 0,
-                                 toEndOpacity: 1,
-                                 timeRange: fadeIn)
-        }
-        if !isLast {
-            let fadeOutStart = CMTimeAdd(startTime,
-                                         CMTimeSubtract(duration,
-                                                        CMTime(seconds: crossfade,
-                                                               preferredTimescale: 600)))
-            let fadeOut = CMTimeRange(
-                start: fadeOutStart,
-                duration: CMTime(seconds: crossfade, preferredTimescale: 600))
-            layer.setOpacityRamp(fromStartOpacity: 1,
-                                 toEndOpacity: 0,
-                                 timeRange: fadeOut)
+        // Walk the speed curve, emitting per-segment insertTimeRange +
+        // scaleTimeRange calls. After all segments are inserted, the
+        // overall rendered duration matches clip.renderedDuration.
+        for seg in clip.speedCurve.segments {
+            let sFrac = seg.sourceFractionStart
+            let eFrac = seg.sourceFractionEnd
+            guard eFrac > sFrac else { continue }
+            let segSourceDur = srcDur * (eFrac - sFrac)
+            let sourceRange = CMTimeRange(
+                start: CMTime(seconds: clip.sourceStart + srcDur * sFrac,
+                              preferredTimescale: 600),
+                duration: CMTime(seconds: segSourceDur,
+                                 preferredTimescale: 600))
+            try videoTrack.insertTimeRange(sourceRange,
+                                           of: assetVideoTrack,
+                                           at: insertTime)
+            if let aTrack = audioTrack, let aSrc = assetAudioTrack {
+                try? aTrack.insertTimeRange(sourceRange,
+                                            of: aSrc,
+                                            at: insertTime)
+            }
+            // Scale the newly-inserted range. Output duration = source /
+            // factor.
+            let inserted = CMTimeRange(
+                start: insertTime,
+                duration: CMTime(seconds: segSourceDur,
+                                 preferredTimescale: 600))
+            let scaled = CMTime(seconds: segSourceDur / max(0.01, seg.factor),
+                                preferredTimescale: 600)
+            videoTrack.scaleTimeRange(inserted, toDuration: scaled)
+            if let aTrack = audioTrack {
+                aTrack.scaleTimeRange(inserted, toDuration: scaled)
+            }
+            insertTime = CMTimeAdd(insertTime, scaled)
         }
 
-        instruction.layerInstructions = [layer]
-        return instruction
+        // Build the per-clip CinematicInstruction. Transition window
+        // sits at the very tail of the clip.
+        let renderedDur = insertTime.seconds - segmentStart.seconds
+        let outRange = CMTimeRange(start: segmentStart,
+                                   duration: CMTime(seconds: renderedDur,
+                                                    preferredTimescale: 600))
+        var transitionKind: TransitionKind? = nil
+        var transitionStart: Double? = nil
+        var transitionEnd: Double? = nil
+        if next != nil {
+            let dur = min(transitionDuration, max(0.18, renderedDur * 0.25))
+            transitionKind = clip.outgoingTransition
+            transitionEnd = segmentStart.seconds + renderedDur
+            transitionStart = transitionEnd! - dur
+        }
+
+        let instr = CinematicInstruction(
+            timeRange: outRange,
+            startSeconds: segmentStart.seconds,
+            trackAID: videoTrack.trackID,
+            trackBID: nil,
+            cropKeyframes: clip.cropKeyframes,
+            look: plan.style.lookUpTable,
+            transitionKind: transitionKind,
+            transitionStart: transitionStart,
+            transitionEnd: transitionEnd)
+        instructions.append(instr)
     }
 
-    private func transformForCenter(_ center: CGPoint,
-                                    sourceSize: CGSize,
-                                    outputSize: CGSize) -> CGAffineTransform {
-        // Source is 1920x1080 landscape. We want a 9:16 viewport centered on
-        // `center` (normalized 0..1 in source), scaled to fill 1080x1920 output.
-        // Compute the crop window width in source pixels:
-        let cropHeight = sourceSize.height
-        let cropWidth = cropHeight * (9.0 / 16.0)
+    // MARK: - Title / closing card (black source segment)
 
-        // Convert normalized center into source-pixel coords (Vision uses
-        // bottom-left; UIKit/Core Animation uses top-left — match accordingly)
-        let cx = center.x * sourceSize.width
-        let cy = (1 - center.y) * sourceSize.height
+    /// AVMutableComposition can't insert "blank" video — we need real
+    /// source pixels. Strategy: insert a tiny slice of source video
+    /// (any frame will do) and let the custom compositor cover it with
+    /// a Core Animation layer in front. The compositor's vignette +
+    /// LUT pass on a 1.0-scale crop will still produce a "video frame"
+    /// underneath, but the title overlay layer on top hides it.
+    /// Cheap and avoids bundling a black asset.
+    private func insertBlackCard(duration: Double,
+                                 composition: AVMutableComposition,
+                                 videoTrack: AVMutableCompositionTrack,
+                                 at insertTime: inout CMTime,
+                                 instructions: inout [CinematicInstruction],
+                                 plan: EditPlan) throws {
+        let segmentStart = insertTime
+        let cardDur = CMTime(seconds: duration, preferredTimescale: 600)
 
-        // Clamp the crop window so it stays inside the source frame
-        let halfW = cropWidth / 2
-        let clampedCx = min(max(cx, halfW), sourceSize.width - halfW)
+        // Reuse the existing video track's last 0.5s frozen via scale
+        // — but the simplest approach that doesn't depend on prior
+        // tracks is to insert an empty time range, which AVFoundation
+        // renders as black with our custom compositor.
+        videoTrack.insertEmptyTimeRange(
+            CMTimeRange(start: insertTime, duration: cardDur))
+        insertTime = CMTimeAdd(insertTime, cardDur)
 
-        // The transform: translate so (clampedCx - halfW, 0) maps to (0,0),
-        // then scale so cropWidth → outputSize.width.
-        let scale = outputSize.width / cropWidth
-        var t = CGAffineTransform.identity
-        t = t.scaledBy(x: scale, y: scale)
-        t = t.translatedBy(x: -(clampedCx - halfW), y: 0)
-        return t
+        // For empty ranges we still need an instruction covering the
+        // span. The compositor will receive no source frames; our
+        // applyCropAndGrade short-circuits on missing source, so the
+        // overlay-only layer (driven by Core Animation) renders alone.
+        let outRange = CMTimeRange(start: segmentStart, duration: cardDur)
+        let instr = CinematicInstruction(
+            timeRange: outRange,
+            startSeconds: segmentStart.seconds,
+            trackAID: videoTrack.trackID,
+            trackBID: nil,
+            cropKeyframes: [CropKeyframe(time: 0,
+                                         center: CGPoint(x: 0.5, y: 0.5),
+                                         scale: 1.0)],
+            look: plan.style.lookUpTable,
+            transitionKind: nil,
+            transitionStart: nil,
+            transitionEnd: nil)
+        instructions.append(instr)
     }
 
-    private func smoothPlayerCenters(boxes: [TimedBox],
-                                     clipStart: Double,
-                                     clipEnd: Double) -> [CGPoint] {
-        let inWindow = boxes.filter { $0.time >= clipStart - 0.5 && $0.time <= clipEnd + 0.5 }
-        if inWindow.isEmpty { return [] }
+    // MARK: - Preset
 
-        // Simple exponential smoothing (alpha = 0.3)
-        let alpha: CGFloat = 0.3
-        var smoothed: [CGPoint] = []
-        var prev = CGPoint(x: inWindow[0].box.midX, y: inWindow[0].box.midY)
-        for entry in inWindow {
-            let raw = CGPoint(x: entry.box.midX, y: entry.box.midY)
-            let next = CGPoint(x: prev.x + alpha * (raw.x - prev.x),
-                               y: prev.y + alpha * (raw.y - prev.y))
-            smoothed.append(next)
-            prev = next
-        }
-        return smoothed
+    /// Prefer HEVC. The 1080p HEVC preset gives us ~50% smaller files
+    /// at the same quality vs the highest-quality H.264 preset. Fall
+    /// back to highestQuality (H.264-compatible) when HEVC isn't
+    /// available for the current composition.
+    private func pickExportPreset(asset: AVAsset) -> String {
+        let hevc1080 = AVAssetExportPresetHEVC1920x1080
+        let compatible = AVAssetExportSession
+            .exportPresets(compatibleWith: asset)
+        if compatible.contains(hevc1080) { return hevc1080 }
+        return AVAssetExportPresetHighestQuality
     }
 }

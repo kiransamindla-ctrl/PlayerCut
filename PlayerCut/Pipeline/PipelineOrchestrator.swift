@@ -190,17 +190,47 @@ actor PipelineOrchestrator {
                     try? FileManager.default.createDirectory(
                         at: outputURL.deletingLastPathComponent(),
                         withIntermediateDirectories: true)
+
+                    // Build the cinematic EditPlan from the ranker's
+                    // clip selection. Style derives from the player's
+                    // musicVibe; the perf profile downgrades transition
+                    // complexity and crop keyframe density on weaker
+                    // hardware or under thermal pressure.
+                    let aspect = game.outputAspectOverride ?? player.outputAspect
+                    let renderSize = aspect.renderSize(forLength: length)
+                    let output = OutputSpec(size: renderSize, fps: 30)
+                    let style = EditStyle.defaultFor(
+                        musicVibe: player.musicVibe)
+                    let perfProfile = await DeviceClass.shared.editProfile()
+                    let planBuildStart = Date()
+                    let builder = EditPlanBuilder(
+                        style: style,
+                        output: output,
+                        sourceDuration: videoDuration,
+                        profile: perfProfile)
+                    let editPlan = builder.build(
+                        from: plan,
+                        player: player,
+                        game: game,
+                        musicURL: musicURL,
+                        musicBPM: nil)
+                    await DiagnosticsStore.shared.recordDuration(
+                        .composePlan,
+                        seconds: Date().timeIntervalSince(planBuildStart))
+
                     let composeStart = Date()
                     let composeResult = try await self.composer.compose(
-                        plan: plan,
+                        plan: editPlan,
                         game: game,
                         player: player,
-                        length: length,
-                        musicURL: musicURL,
                         outputURL: outputURL)
+                    let composeWall = Date().timeIntervalSince(composeStart)
                     await DiagnosticsStore.shared.recordDuration(
                         .composition,
-                        seconds: Date().timeIntervalSince(composeStart))
+                        seconds: composeWall)
+                    await DiagnosticsStore.shared.recordDuration(
+                        .composeExport,
+                        seconds: composeWall)
                     game.localReelURL = composeResult.localURL
                     game.savedToPhotos = composeResult.savedToPhotos
                     game.exportedReelAssetId = composeResult.assetId

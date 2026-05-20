@@ -257,6 +257,14 @@ enum DurationKey: String {
     case composition = "composition_seconds"
     case totalPipeline = "total_pipeline_seconds"
     case captureSession = "capture_session_seconds"
+    // Per-stage cinematic compose timings (milliseconds-resolution
+    // doubles in seconds — same shape as the others). Surface in the
+    // delivery summary so we can see where compose time really goes.
+    case composePlan       = "compose_plan_seconds"
+    case composeReframe    = "compose_reframe_seconds"
+    case composeTransition = "compose_transition_seconds"
+    case composeGrade      = "compose_grade_seconds"
+    case composeExport     = "compose_export_seconds"
 }
 
 enum EnumKey: String {
