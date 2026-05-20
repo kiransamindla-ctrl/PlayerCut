@@ -23,6 +23,19 @@ final class GameCaptureController: NSObject {
     var session: AVCaptureSession { _session }
     private let videoOutput = AVCaptureMovieFileOutput()
     private let audioDataOutput = AVCaptureAudioDataOutput()
+    /// Diagnostic frame tap. Verifies the AV pipeline is actually
+    /// producing frames — `session.isRunning == true` alone is a known
+    /// false-positive (developer.apple.com/forums/thread/811759).
+    private let frameTapOutput = AVCaptureVideoDataOutput()
+    private let frameTapQueue = DispatchQueue(label: "playercut.frameTap")
+
+    /// THE serial queue. Per Apple's AVCam sample and the AVFoundation
+    /// engineer guidance on developer.apple.com/forums/thread/792147:
+    /// every touch of AVCaptureSession, its inputs/outputs/connections,
+    /// and the underlying AVCaptureDevice MUST happen on this single
+    /// serial queue. Concurrent dispatches collide and strand
+    /// startRunning() — exactly the preview-black bug we just diagnosed.
+    private let sessionQueue = DispatchQueue(label: "com.playercut.sessionQueue")
 
     private let audioQueue = DispatchQueue(label: "playercut.audio.loudness")
     private var loudnessSamples: [LoudnessSample] = []
@@ -68,34 +81,34 @@ final class GameCaptureController: NSObject {
         }
     }
 
-    // MARK: - Setup
+    // MARK: - Setup (Apple AVCam serial-queue pattern)
     //
-    // configure() is split into two phases on purpose:
+    // Everything that touches the session, its inputs/outputs, or the
+    // underlying AVCaptureDevice runs SEQUENTIALLY on `sessionQueue`.
+    // Order inside that single async block:
     //
-    //   PHASE 1 (must succeed if the camera exists) — audio session,
-    //     video + audio inputs, file + audio-tap outputs, session
-    //     commit, AND session.startRunning(). The preview goes LIVE
-    //     here. This phase only throws if there is literally no usable
-    //     camera; it does not depend on recipe selection.
+    //   a. session.beginConfiguration()
+    //   b. add video input, audio input, movie output, audio tap, frame tap
+    //   c. session.commitConfiguration()
+    //   d. apply the capture recipe (device.lockForConfiguration ↔ unlock)
+    //   e. session.startRunning()
     //
-    //   PHASE 2 (best-effort) — apply the adaptive capture recipe
-    //     (activeFormat + locked fps + HDR-off + locked WB). If any
-    //     step fails we log loudly and leave the device on whatever
-    //     default format AVFoundation picked from the session. The
-    //     preview stays live; the user can still tap record.
+    // Because sessionQueue is a serial queue, these can never overlap;
+    // startRunning() is therefore never called between a
+    // beginConfiguration/commitConfiguration pair, and the recipe's
+    // device-config block can never race a concurrent startRunning.
     //
-    // The previous code path threw out of Phase 1 if format selection
-    // failed, which left the SwiftUI preview attached to a session
-    // that was configured-but-never-started — black screen, frozen UI.
+    // The AVCaptureVideoPreviewLayer's `session` is set elsewhere
+    // (CameraPreviewView.makeUIView) — Apple's documented exception
+    // that does not require the sessionQueue.
 
     func configure() throws {
         log.info("configure() start")
         debugInfo.configureStarted = true
         debugInfo.observeRuntimeErrors(on: session)
-        // B3: pin the audio session to .playAndRecord for the duration
-        // of the capture session. The default .ambient category would
-        // be deactivated by AVCapture and re-activated on each output,
-        // which causes glitchy loudness samples in the first second.
+        debugInfo.firstFrameDelegate.debugInfo = debugInfo
+        // B3: pin the audio session to .playAndRecord. Synchronous,
+        // doesn't touch AVCaptureSession.
         do {
             let audio = AVAudioSession.sharedInstance()
             try audio.setCategory(.playAndRecord,
@@ -109,185 +122,233 @@ final class GameCaptureController: NSObject {
         } catch {
             log.warning("AVAudioSession config failed: \(error.localizedDescription)")
         }
-
-        // Battery monitoring has to be opted into before UIDevice will
-        // report a real level. Cheap to enable; survives backgrounding.
         UIDevice.current.isBatteryMonitoringEnabled = true
 
-        // ─── PHASE 1: inputs + outputs + session start ─────────────
-        session.beginConfiguration()
-        // sessionPreset .inputPriority lets a later device.activeFormat
-        // assignment take effect; without it the preset wins and the
-        // recipe is silently overridden. If we never set activeFormat
-        // (Phase 2 fails), .inputPriority falls back to the device's
-        // own default format, which still gives a usable preview.
-        session.sessionPreset = .inputPriority
-        log.info("configure() sessionPreset=inputPriority, beginConfiguration ok")
-
-        // Video input — prefer the ultrawide on A12+ phones because it
-        // captures more of the sideline at the same tripod distance.
-        // Fall back to the standard wide if the device doesn't expose
-        // an ultrawide (older models, or specific iPhone SEs).
+        // Pick the AVCaptureDevice synchronously on the main actor so
+        // we can stash it and pass it to the sessionQueue block.
         let videoDevice: AVCaptureDevice
         if let ultrawide = AVCaptureDevice.default(.builtInUltraWideCamera,
                                                    for: .video,
                                                    position: .back) {
             videoDevice = ultrawide
-            log.info("configure() video device: builtInUltraWideCamera")
             debugInfo.selectedCamera = "ultrawide"
+            log.info("configure() video device: builtInUltraWideCamera")
         } else if let wide = AVCaptureDevice.default(.builtInWideAngleCamera,
                                                      for: .video,
                                                      position: .back) {
             videoDevice = wide
-            log.info("configure() video device: builtInWideAngleCamera (no ultrawide)")
             debugInfo.selectedCamera = "wide (no ultrawide)"
+            log.info("configure() video device: builtInWideAngleCamera (no ultrawide)")
         } else {
-            session.commitConfiguration()
             debugInfo.selectedCamera = "(none)"
             throw PipelineError.captureFailed("No back camera available")
         }
-
-        let videoInput = try AVCaptureDeviceInput(device: videoDevice)
-        guard session.canAddInput(videoInput) else {
-            session.commitConfiguration()
-            throw PipelineError.captureFailed("Cannot add video input")
-        }
-        session.addInput(videoInput)
-        log.info("configure() video input added")
-
-        // Audio input
-        guard let audioDevice = AVCaptureDevice.default(for: .audio) else {
-            session.commitConfiguration()
-            throw PipelineError.captureFailed("No audio device")
-        }
-        let audioInput = try AVCaptureDeviceInput(device: audioDevice)
-        guard session.canAddInput(audioInput) else {
-            session.commitConfiguration()
-            throw PipelineError.captureFailed("Cannot add audio input")
-        }
-        session.addInput(audioInput)
-        log.info("configure() audio input added")
-
-        // Movie file output. Codec is HEVC by default; Phase 2 may
-        // downgrade to H.264 if the recipe resolved that way.
-        guard session.canAddOutput(videoOutput) else {
-            session.commitConfiguration()
-            throw PipelineError.captureFailed("Cannot add movie file output")
-        }
-        session.addOutput(videoOutput)
-        if let connection = videoOutput.connection(with: .video) {
-            let chosenCodec: AVVideoCodecType =
-                videoOutput.availableVideoCodecTypes.contains(.hevc)
-                ? .hevc : .h264
-            videoOutput.setOutputSettings(
-                [AVVideoCodecKey: chosenCodec], for: connection)
-            connection.preferredVideoStabilizationMode = .standard
-        }
-        log.info("configure() movie output added")
-
-        // Audio data tap for loudness
-        audioDataOutput.setSampleBufferDelegate(self, queue: audioQueue)
-        guard session.canAddOutput(audioDataOutput) else {
-            session.commitConfiguration()
-            throw PipelineError.captureFailed("Cannot add audio data output")
-        }
-        session.addOutput(audioDataOutput)
-        log.info("configure() audio tap added")
-
-        session.commitConfiguration()
-        log.info("configure() commitConfiguration done")
-
         self.videoDevice = videoDevice
+        observeThermalAndBattery()
 
-        // Start the session ON A BACKGROUND QUEUE per Apple's
-        // recommendation. startRunning() blocks until the AV pipeline
-        // is up; doing it from main can pause the SwiftUI render that's
-        // about to attach the preview layer.
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            self.session.startRunning()
-            let running = self.session.isRunning
+        // Capture-by-value the references the closure needs. The session
+        // and the output objects are reference types whose identity is
+        // stable; capturing them here avoids touching @MainActor `self.*`
+        // from the background queue.
+        let session = self._session
+        let videoOutput = self.videoOutput
+        let audioDataOutput = self.audioDataOutput
+        let frameTapOutput = self.frameTapOutput
+        let frameTapDelegate = self.debugInfo.firstFrameDelegate
+        let audioQueue = self.audioQueue
+        let frameTapQueue = self.frameTapQueue
+        let debugInfo = self.debugInfo
+        let audioDelegate: AVCaptureAudioDataOutputSampleBufferDelegate = self
+
+        // ── All session work runs sequentially on the serial queue ──
+        sessionQueue.async { [weak self] in
+            session.beginConfiguration()
+            session.sessionPreset = .inputPriority
+
+            var setupFailure: String?
+
+            // a→b: video input
+            do {
+                let videoInput = try AVCaptureDeviceInput(device: videoDevice)
+                if session.canAddInput(videoInput) {
+                    session.addInput(videoInput)
+                } else {
+                    setupFailure = "cannot add video input"
+                }
+            } catch {
+                setupFailure = "video input init: \(error.localizedDescription)"
+            }
+
+            if setupFailure == nil, let audioDevice = AVCaptureDevice.default(for: .audio) {
+                if let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
+                   session.canAddInput(audioInput) {
+                    session.addInput(audioInput)
+                }
+            }
+
+            if setupFailure == nil {
+                // Movie file output
+                if session.canAddOutput(videoOutput) {
+                    session.addOutput(videoOutput)
+                    if let conn = videoOutput.connection(with: .video) {
+                        let codec: AVVideoCodecType =
+                            videoOutput.availableVideoCodecTypes.contains(.hevc)
+                            ? .hevc : .h264
+                        videoOutput.setOutputSettings(
+                            [AVVideoCodecKey: codec], for: conn)
+                        conn.preferredVideoStabilizationMode = .standard
+                    }
+                }
+
+                // Audio loudness tap
+                audioDataOutput.setSampleBufferDelegate(audioDelegate,
+                                                       queue: audioQueue)
+                if session.canAddOutput(audioDataOutput) {
+                    session.addOutput(audioDataOutput)
+                }
+
+                // Diagnostic frame tap (verifies frames flow).
+                frameTapOutput.alwaysDiscardsLateVideoFrames = true
+                frameTapOutput.setSampleBufferDelegate(frameTapDelegate,
+                                                      queue: frameTapQueue)
+                if session.canAddOutput(frameTapOutput) {
+                    session.addOutput(frameTapOutput)
+                }
+            }
+
+            // c: commit
+            session.commitConfiguration()
+            if let failure = setupFailure {
+                Task { @MainActor [weak self] in
+                    self?.debugInfo.recipeOutcome = "FAILED setup: \(failure)"
+                }
+                Logger(subsystem: "com.playercut.app", category: "Capture")
+                    .error("session setup failed: \(failure, privacy: .public)")
+                return
+            }
+
+            // d: apply recipe (device hardware config). Runs on this
+            // same serial queue → cannot race a beginConfiguration block.
+            // activeFormat is set on a not-yet-running session so no
+            // session.beginConfiguration wrapper is required here.
+            Self.applyRecipeOnSessionQueue(device: videoDevice,
+                                           videoOutput: videoOutput,
+                                           debugInfo: debugInfo,
+                                           controller: self)
+
+            // e: startRunning — strictly after commit and recipe.
+            session.startRunning()
+            let running = session.isRunning
             Logger(subsystem: "com.playercut.app", category: "Capture")
-                .info("configure() session.startRunning() returned, isRunning=\(running)")
+                .info("startRunning() returned, isRunning=\(running)")
             Task { @MainActor [weak self] in
                 self?.debugInfo.startRunningSawIsRunning = running
             }
         }
 
-        observeThermalAndBattery()
-
-        // ─── PHASE 2: best-effort recipe application ───────────────
-        // Off-main on the same queue so it runs after startRunning has
-        // settled. Any failure logs loudly and leaves the device on
-        // its default format — preview stays live regardless.
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            Task { @MainActor [weak self] in
-                self?.applyRecipeBestEffort(on: videoDevice)
-            }
-        }
-
-        log.info("configure() returning — preview should go live shortly")
         debugInfo.configureReturned = true
+        log.info("configure() returning — session setup dispatched to serial queue")
     }
 
-    /// Best-effort recipe application. Picks the ideal recipe for the
-    /// current SoC tier + thermal/battery state, asks DeviceCapabilities
-    /// to step it down to a supported AVCaptureDevice.Format, and
-    /// applies it. On any failure it logs the reason and leaves the
-    /// device on its existing (default) format. The session is already
-    /// running when we get here, so the preview never goes dark.
-    private func applyRecipeBestEffort(on device: AVCaptureDevice) {
-        socTier = DeviceCapabilities.currentTier()
-        debugInfo.resolvedTier = socTier.rawValue
+    /// Recipe application body. RUNS ON sessionQueue (nonisolated so
+    /// the caller can invoke it from inside the queue's async closure
+    /// without an actor hop). Sets activeFormat / locked fps / HDR off
+    /// on the device, plus re-pins codec/stabilization on the movie
+    /// output. Reports outcome to `debugInfo` via a MainActor hop.
+    ///
+    /// Per the user's diagnosis: this MUST run after commitConfiguration
+    /// and is NOT wrapped in another begin/commit — the session isn't
+    /// running yet at this point, so activeFormat assignment doesn't
+    /// need the wrapper.
+    nonisolated private static func applyRecipeOnSessionQueue(
+        device: AVCaptureDevice,
+        videoOutput: AVCaptureMovieFileOutput,
+        debugInfo: CaptureDebugInfo,
+        controller: GameCaptureController?
+    ) {
+        let log = Logger(subsystem: "com.playercut.app", category: "Capture")
+        let tier = DeviceCapabilities.currentTier()
+        Task { @MainActor [weak controller] in
+            controller?.socTier = tier
+            debugInfo.resolvedTier = tier.rawValue
+        }
         let battery = UIDevice.current.batteryLevel
         let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        let initialRecipe = DeviceCapabilities.liveRecipe(
-            for: socTier,
+        let initial = DeviceCapabilities.liveRecipe(
+            for: tier,
             thermal: ProcessInfo.processInfo.thermalState,
             batteryLevel: battery,
             lowPower: lowPower)
-        log.info("recipe: ideal=\(initialRecipe.resolution.rawValue)@\(initialRecipe.fps), tier=\(self.socTier.rawValue, privacy: .public)")
+        log.info("recipe: ideal=\(initial.resolution.rawValue)@\(initial.fps), tier=\(tier.rawValue, privacy: .public)")
 
-        let (resolvedFormat, resolvedRecipe) =
-            DeviceCapabilities.resolveFormat(initialRecipe, on: device)
+        let (resolvedFormat, resolved) =
+            DeviceCapabilities.resolveFormat(initial, on: device)
         guard let format = resolvedFormat else {
             log.warning("recipe: no AVCaptureDevice.Format satisfies any step-down — staying on device default")
-            debugInfo.recipeOutcome = "NO FORMAT (fell back to device default)"
+            Task { @MainActor in
+                debugInfo.recipeOutcome = "NO FORMAT (running on default)"
+            }
             return
         }
+
         do {
-            session.beginConfiguration()
-            defer { session.commitConfiguration() }
-            try applyRecipe(resolvedRecipe,
-                            format: format,
-                            to: device,
-                            scene: .outdoor)
-            self.currentRecipe = resolvedRecipe
-            // Re-pin codec / stabilization on the connection now that
-            // the device may have switched format.
-            if let connection = videoOutput.connection(with: .video) {
-                let chosenCodec: AVVideoCodecType =
-                    (resolvedRecipe.codec == .hevc
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            device.activeFormat = format
+
+            if format.isVideoHDRSupported {
+                device.automaticallyAdjustsVideoHDREnabled = false
+                device.isVideoHDREnabled = false
+            }
+            if device.isFocusModeSupported(.locked) {
+                device.focusMode = .locked
+            }
+            if device.isExposureModeSupported(.locked) {
+                device.exposureMode = .locked
+            }
+            if device.isWhiteBalanceModeSupported(.locked) {
+                device.whiteBalanceMode = .locked
+            }
+            device.activeVideoMinFrameDuration =
+                CMTime(value: 1, timescale: Int32(resolved.fps))
+            device.activeVideoMaxFrameDuration =
+                CMTime(value: 1, timescale: Int32(resolved.fps))
+
+            if let conn = videoOutput.connection(with: .video) {
+                let codec: AVVideoCodecType =
+                    (resolved.codec == .hevc
                      && videoOutput.availableVideoCodecTypes.contains(.hevc))
                     ? .hevc : .h264
                 videoOutput.setOutputSettings(
-                    [AVVideoCodecKey: chosenCodec], for: connection)
-                connection.preferredVideoStabilizationMode =
-                    stabilizationMode(for: resolvedRecipe.stabilization,
-                                      on: connection)
+                    [AVVideoCodecKey: codec], for: conn)
+                conn.preferredVideoStabilizationMode = {
+                    switch resolved.stabilization {
+                    case .off:        return .off
+                    case .standard:   return .standard
+                    case .cinematic:
+                        return conn.isVideoStabilizationSupported
+                            ? .cinematic : .standard
+                    }
+                }()
             }
-            log.info("recipe APPLIED: \(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps) \(resolvedRecipe.codec.rawValue, privacy: .public) stab=\(resolvedRecipe.stabilization.rawValue, privacy: .public)")
-            debugInfo.recipeOutcome = "APPLIED \(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps) \(resolvedRecipe.codec.rawValue) \(resolvedRecipe.stabilization.rawValue)"
-            Task.detached { [tier = socTier, recipe = resolvedRecipe] in
+
+            log.info("recipe APPLIED: \(resolved.resolution.rawValue)@\(resolved.fps) \(resolved.codec.rawValue, privacy: .public)")
+            let outcome = "APPLIED \(resolved.resolution.rawValue)@\(resolved.fps) \(resolved.codec.rawValue) \(resolved.stabilization.rawValue)"
+            Task { @MainActor [weak controller] in
+                controller?.currentRecipe = resolved
+                debugInfo.recipeOutcome = outcome
                 await DiagnosticsStore.shared.recordEnum(
                     .captureSoCTier, value: tier)
                 await DiagnosticsStore.shared.recordEnum(
-                    .captureRecipeResolution, value: recipe.resolution)
+                    .captureRecipeResolution, value: resolved.resolution)
             }
         } catch {
-            log.error("recipe apply FAILED: \(error.localizedDescription) — staying on device default; preview unaffected")
-            debugInfo.recipeOutcome = "FAILED: \(error.localizedDescription)"
+            log.error("recipe apply FAILED: \(error.localizedDescription)")
+            let msg = error.localizedDescription
+            Task { @MainActor in
+                debugInfo.recipeOutcome = "FAILED: \(msg)"
+            }
         }
     }
 
@@ -315,25 +376,30 @@ final class GameCaptureController: NSObject {
 
     /// External watchdog hook: if the preview hasn't gone live within
     /// the UI's grace period, force-start the session again and log.
-    /// Safe to call from any thread; no-ops if already running.
+    /// Dispatches through `sessionQueue` per Apple's pattern — never
+    /// through DispatchQueue.global(), which can collide with the
+    /// configure() session block.
     func forceRestartIfStalled() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            if self.session.isRunning {
+        let session = self._session
+        let debugInfo = self.debugInfo
+        sessionQueue.async {
+            if session.isRunning {
                 Logger(subsystem: "com.playercut.app", category: "Capture")
                     .info("watchdog: session already running, no-op")
-                Task { @MainActor [weak self] in
-                    self?.debugInfo.watchdogSawIsRunning = true
+                Task { @MainActor in
+                    debugInfo.watchdogSawIsRunning = true
                 }
                 return
             }
             Logger(subsystem: "com.playercut.app", category: "Capture")
-                .error("watchdog: session NOT running after grace period — force-starting")
-            Task { @MainActor [weak self] in
-                self?.debugInfo.watchdogSawIsRunning = false
-                self?.debugInfo.watchdogForcedRestart = true
+                .error("watchdog: session NOT running — force-starting on sessionQueue")
+            Task { @MainActor in
+                debugInfo.watchdogSawIsRunning = false
+                debugInfo.watchdogForcedRestart = true
             }
-            self.session.startRunning()
+            session.startRunning()
+            Logger(subsystem: "com.playercut.app", category: "Capture")
+                .info("watchdog: after force-start, isRunning=\(session.isRunning)")
         }
     }
 
@@ -461,6 +527,12 @@ final class GameCaptureController: NSObject {
     /// Re-derives the recipe under current state and applies it if it
     /// has strictly dropped from the active one. No-op if the active
     /// recipe still satisfies the ladder.
+    ///
+    /// Unlike configure(), the session is ALREADY running when a live
+    /// downgrade fires. Per Apple's docs, changing `activeFormat` on a
+    /// running session requires a beginConfiguration/commitConfiguration
+    /// pair around the change. Both happen on `sessionQueue` so they
+    /// can't race anything else.
     private func evaluateDowngrade(trigger: DowngradeTrigger) {
         guard let active = currentRecipe,
               let device = videoDevice else { return }
@@ -483,34 +555,40 @@ final class GameCaptureController: NSObject {
         }
         let fromDesc = "\(active.resolution.rawValue)@\(active.fps)"
         let toDesc   = "\(resolvedRecipe.resolution.rawValue)@\(resolvedRecipe.fps)"
-        let sceneNow = currentSession?.sceneType ?? .outdoor
-        do {
-            session.beginConfiguration()
-            defer { session.commitConfiguration() }
-            try applyRecipe(resolvedRecipe,
-                            format: format,
-                            to: device,
-                            scene: sceneNow)
-            currentRecipe = resolvedRecipe
-            // Update the in-flight session so the persisted recipe
-            // reflects what we actually recorded with.
-            if var live = currentSession {
-                live.captureRecipe = resolvedRecipe
-                currentSession = live
-            }
-            log.info("Capture downgrade (\(trigger == .thermal ? "thermal" : "battery", privacy: .public)): \(fromDesc, privacy: .public) → \(toDesc, privacy: .public)")
-            Task.detached {
-                switch trigger {
-                case .thermal:
-                    await DiagnosticsStore.shared
-                        .increment(.captureDowngradeThermal)
-                case .battery:
-                    await DiagnosticsStore.shared
-                        .increment(.captureDowngradeBattery)
+
+        let session = self._session
+        sessionQueue.async { [weak self] in
+            do {
+                session.beginConfiguration()
+                defer { session.commitConfiguration() }
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                device.activeFormat = format
+                device.activeVideoMinFrameDuration =
+                    CMTime(value: 1, timescale: Int32(resolvedRecipe.fps))
+                device.activeVideoMaxFrameDuration =
+                    CMTime(value: 1, timescale: Int32(resolvedRecipe.fps))
+                Logger(subsystem: "com.playercut.app", category: "Capture")
+                    .info("downgrade applied on sessionQueue: \(fromDesc, privacy: .public) → \(toDesc, privacy: .public)")
+                Task { @MainActor [weak self] in
+                    self?.currentRecipe = resolvedRecipe
+                    if var live = self?.currentSession {
+                        live.captureRecipe = resolvedRecipe
+                        self?.currentSession = live
+                    }
+                    switch trigger {
+                    case .thermal:
+                        await DiagnosticsStore.shared
+                            .increment(.captureDowngradeThermal)
+                    case .battery:
+                        await DiagnosticsStore.shared
+                            .increment(.captureDowngradeBattery)
+                    }
                 }
+            } catch {
+                Logger(subsystem: "com.playercut.app", category: "Capture")
+                    .error("downgrade reconfigure failed: \(error.localizedDescription)")
             }
-        } catch {
-            log.error("Downgrade reconfigure failed: \(error.localizedDescription)")
         }
     }
 
@@ -546,11 +624,15 @@ final class GameCaptureController: NSObject {
 
     // MARK: - Scene detection (pre-flight luminance sample)
 
-    /// One-shot pre-flight: starts the session if needed, taps a single
-    /// video frame, returns `.indoor` if mean Y-plane luminance is
-    /// below 0.3 (gym/practice room), `.outdoor` otherwise. Times out at
-    /// 2 s with `.outdoor` so a misbehaving device never blocks
+    /// One-shot pre-flight: taps a single video frame from the already-
+    /// running session, returns `.indoor` if mean Y-plane luminance is
+    /// below 0.3 (gym/practice room), `.outdoor` otherwise. Times out
+    /// at 2 s with `.outdoor` so a misbehaving device never blocks
     /// recording start.
+    ///
+    /// The session is configured + started by configure(); we add a
+    /// temporary AVCaptureVideoDataOutput on `sessionQueue` so the
+    /// add/remove can't race with anything.
     private func sampleSceneType() async -> SceneType {
         let dataOutput = AVCaptureVideoDataOutput()
         dataOutput.videoSettings = [
@@ -561,24 +643,29 @@ final class GameCaptureController: NSObject {
         let queue = DispatchQueue(label: "playercut.scene.detect")
         dataOutput.setSampleBufferDelegate(delegate, queue: queue)
 
-        session.beginConfiguration()
-        guard session.canAddOutput(dataOutput) else {
-            session.commitConfiguration()
-            log.warning("Scene detect: cannot add data output, defaulting outdoor")
-            return .outdoor
-        }
-        session.addOutput(dataOutput)
-        session.commitConfiguration()
-
-        if !session.isRunning {
-            session.startRunning()
+        let session = self._session
+        // Add the data output on the serial sessionQueue.
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            sessionQueue.async {
+                session.beginConfiguration()
+                if session.canAddOutput(dataOutput) {
+                    session.addOutput(dataOutput)
+                }
+                session.commitConfiguration()
+                cont.resume()
+            }
         }
 
         let luminance = await delegate.firstLuminance(timeoutSeconds: 2.0)
 
-        session.beginConfiguration()
-        session.removeOutput(dataOutput)
-        session.commitConfiguration()
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            sessionQueue.async {
+                session.beginConfiguration()
+                session.removeOutput(dataOutput)
+                session.commitConfiguration()
+                cont.resume()
+            }
+        }
 
         guard let lum = luminance else {
             log.warning("Scene detect: timed out, defaulting outdoor")
@@ -613,17 +700,51 @@ final class GameCaptureController: NSObject {
         // params before the actual recording starts. Defaults outdoor on
         // any failure so we never block the user from recording.
         let scene = await sampleSceneType()
+        // Re-lock the scene-aware WB on sessionQueue (device hardware
+        // config, must be on the same serial queue as all other
+        // device.lockForConfiguration callers).
         if let device = videoDevice, let recipe = currentRecipe {
-            try? applyRecipe(recipe,
-                             format: device.activeFormat,
-                             to: device,
-                             scene: scene)
+            let session = self._session
+            sessionQueue.async {
+                guard session.isRunning else { return }
+                do {
+                    try device.lockForConfiguration()
+                    defer { device.unlockForConfiguration() }
+                    if device.isWhiteBalanceModeSupported(.locked) {
+                        switch scene {
+                        case .indoor:
+                            let target = AVCaptureDevice
+                                .WhiteBalanceTemperatureAndTintValues(
+                                    temperature: 4000, tint: 0)
+                            var gains = device.deviceWhiteBalanceGains(for: target)
+                            gains = Self.clampGains(gains,
+                                                    max: device.maxWhiteBalanceGain)
+                            device.setWhiteBalanceModeLocked(with: gains) { _ in }
+                        case .outdoor:
+                            device.whiteBalanceMode = .locked
+                        }
+                    }
+                    _ = recipe // referenced for future scene-aware re-tunes
+                } catch {
+                    Logger(subsystem: "com.playercut.app", category: "Capture")
+                        .error("scene WB re-lock failed: \(error.localizedDescription)")
+                }
+            }
         }
 
-        if !session.isRunning {
-            session.startRunning()
+        // startRunning has already been called by configure(); if for
+        // any reason it isn't running, kick it back via sessionQueue.
+        let session = self._session
+        let videoOutput = self.videoOutput
+        let recordingDelegate: AVCaptureFileOutputRecordingDelegate = self
+        sessionQueue.async {
+            if !session.isRunning {
+                Logger(subsystem: "com.playercut.app", category: "Capture")
+                    .warning("startRecording: session not running, starting now")
+                session.startRunning()
+            }
+            videoOutput.startRecording(to: videoURL, recordingDelegate: recordingDelegate)
         }
-        videoOutput.startRecording(to: videoURL, recordingDelegate: self)
 
         let game = GameSession(id: id,
                                playerId: player.id,
@@ -650,8 +771,18 @@ final class GameCaptureController: NSObject {
         guard var game = currentSession else {
             throw PipelineError.captureFailed("No active session")
         }
-        videoOutput.stopRecording()
-        // The delegate writes the file; we wait briefly for finalization.
+        // Stop the file output + (eventually) the session on the
+        // sessionQueue. Don't bother awaiting the stop — the delegate
+        // signals completion via fileOutput(:didFinishRecordingTo:).
+        let session = self._session
+        let videoOutput = self.videoOutput
+        sessionQueue.async {
+            videoOutput.stopRecording()
+            if session.isRunning {
+                session.stopRunning()
+            }
+        }
+        // Wait briefly for finalization.
         try await Task.sleep(nanoseconds: 300_000_000)
 
         // Write loudness sidecar
@@ -661,10 +792,6 @@ final class GameCaptureController: NSObject {
         game.endedAt = Date()
         game.status = .awaitingProcessing
         currentSession = nil
-
-        if session.isRunning {
-            session.stopRunning()
-        }
         log.info("Recording stopped: \(game.id.uuidString), \(self.loudnessSamples.count) loudness samples")
 
         await DiagnosticsStore.shared.increment(.gamesRecorded)

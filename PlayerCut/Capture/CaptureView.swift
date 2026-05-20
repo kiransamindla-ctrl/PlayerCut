@@ -82,6 +82,9 @@ struct CaptureView: View {
                 debugRow("session.isRunning",
                          coordinator.captureController.debugInfo
                             .liveSessionIsRunning ? "true" : "FALSE")
+                debugRow("FRAME received",
+                         coordinator.captureController.debugInfo
+                            .firstFrameReceived ? "YES ✓" : "no — not flowing")
                 debugRow("configured (View)",
                          configured ? "true" : "FALSE")
                 debugRow("watchdog isRunning@3s",

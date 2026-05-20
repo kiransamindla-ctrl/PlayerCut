@@ -10,6 +10,7 @@
 //    2. preview watchdog: session.isRunning = ?
 //    3. recipe: APPLIED <res>@<fps> / FAILED <reason> / pending
 //    4. any AVCaptureSession runtime error
+//    5. selectedCamera, activeFormat, firstFrameReceived
 //
 //  Lives as an ObservableObject on the capture controller. The
 //  CaptureView reads it in an overlay so it renders on top of the
@@ -25,51 +26,60 @@ import os.log
 @MainActor
 final class CaptureDebugInfo: ObservableObject {
 
-    /// configure() phases. `nil` = the line never executed; bool = the
-    /// value we read at that line.
+    // ── configure() lifecycle ────────────────────────────────────
     @Published var configureStarted: Bool = false
     @Published var configureReturned: Bool = false
 
-    /// Captured at the moment `session.startRunning()` returns from
-    /// inside configure()'s Phase 1 dispatch. `nil` until the dispatch
-    /// actually executes.
+    // ── session.startRunning() observed value (Optional → nil =
+    //    line never reached) ────────────────────────────────────
     @Published var startRunningSawIsRunning: Bool?
 
-    /// Set by the 3-second preview watchdog in CaptureView. `nil` until
-    /// the watchdog runs.
+    // ── 3-second preview watchdog (Optional → nil = never fired) ─
     @Published var watchdogSawIsRunning: Bool?
-    /// True iff the watchdog hit the `forceRestartIfStalled()` path.
     @Published var watchdogForcedRestart: Bool = false
 
-    /// Recipe outcome from `applyRecipeBestEffort`.
-    /// "" = never ran yet; "APPLIED 4k@60 hvc cinematic" / "FAILED: ..."
+    // ── Recipe outcome ────────────────────────────────────────────
+    /// "pending" until applyRecipe runs; then
+    /// "APPLIED 4k@60 hvc cinematic" / "FAILED: ..." / "NO FORMAT (running on default)".
     @Published var recipeOutcome: String = "pending"
 
-    /// First AVCaptureSession runtime error we observed via
-    /// NSNotification, or `nil` if the session has never reported one.
+    // ── First AVCaptureSessionRuntimeErrorNotification ───────────
     @Published var lastSessionRuntimeError: String?
 
-    /// SoC tier as DeviceCapabilities resolved it at configure().
+    // ── Hardware / format ─────────────────────────────────────────
     @Published var resolvedTier: String = "?"
-
-    /// "ultrawide" / "wide" / "(none)" — set when configure() picks the
-    /// AVCaptureDevice. Reflects the actual hardware unit feeding the
-    /// session, not just what the recipe asked for.
     @Published var selectedCamera: String = "(not picked)"
-
-    /// Live `session.isRunning` polled by the view. Set from the view
-    /// because polling AVCaptureSession.isRunning is cheap and reading
-    /// it inside the controller closures would require explicit
-    /// scheduling.
     @Published var liveSessionIsRunning: Bool = false
-
-    /// Live `device.activeFormat` description polled by the view —
-    /// e.g. "3840x2160 @60 hvc1" or "1920x1080 @30 420v". Updates even
-    /// if applyRecipe never ran (shows whatever the device defaulted
-    /// to under sessionPreset .inputPriority).
     @Published var liveActiveFormat: String = "(unknown)"
 
+    /// True the first time the diagnostic AVCaptureVideoDataOutput
+    /// delegate sees a sample buffer. Apple has documented that
+    /// `session.isRunning == true` doesn't guarantee frames are
+    /// flowing (developer.apple.com/forums/thread/811759); this is
+    /// the only reliable proof the pipeline is alive.
+    @Published var firstFrameReceived: Bool = false
+
+    // ── Internals ─────────────────────────────────────────────────
+
     private var sessionErrorToken: NSObjectProtocol?
+
+    /// Strong-held delegate for the diagnostic AVCaptureVideoDataOutput.
+    /// Keeps the delegate alive while the session is configured.
+    let firstFrameDelegate = FirstFrameDelegate()
+
+    init() {
+        firstFrameDelegate.debugInfo = self
+    }
+
+    /// Flip `firstFrameReceived` true exactly once. Called from the
+    /// FirstFrameDelegate on its sample-buffer queue; nonisolated so
+    /// the delegate doesn't need to hop to MainActor itself.
+    nonisolated func markFirstFrameReceived() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if !self.firstFrameReceived { self.firstFrameReceived = true }
+        }
+    }
 
     /// Install once per session lifecycle. Captures the first runtime
     /// error and freezes it on screen so the user can read it.
@@ -78,7 +88,7 @@ final class CaptureDebugInfo: ObservableObject {
         sessionErrorToken = NotificationCenter.default.addObserver(
             forName: .AVCaptureSessionRuntimeError,
             object: session, queue: .main
-        ) { note in
+        ) { [weak self] note in
             let err = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
             let text = err.map { "\($0.domain) \($0.code) — \($0.localizedDescription)" }
                 ?? "runtime error (no userInfo)"
@@ -89,5 +99,34 @@ final class CaptureDebugInfo: ObservableObject {
                    category: "CaptureDbg")
                 .error("AVCaptureSessionRuntimeError: \(text, privacy: .public)")
         }
+    }
+}
+
+// MARK: - First-frame delegate
+
+/// Flips `CaptureDebugInfo.firstFrameReceived` true the first time
+/// `AVCaptureVideoDataOutput` delivers a sample buffer.
+final class FirstFrameDelegate: NSObject,
+                                AVCaptureVideoDataOutputSampleBufferDelegate,
+                                @unchecked Sendable {
+
+    /// Weakly held back-reference so the delegate can flip the flag
+    /// without retaining its owner.
+    weak var debugInfo: CaptureDebugInfo?
+
+    private let lock = NSLock()
+    private var fired = false
+
+    nonisolated func captureOutput(_ output: AVCaptureOutput,
+                                   didOutput sampleBuffer: CMSampleBuffer,
+                                   from connection: AVCaptureConnection) {
+        lock.lock()
+        let shouldFire = !fired
+        fired = true
+        lock.unlock()
+        guard shouldFire else { return }
+        debugInfo?.markFirstFrameReceived()
+        Logger(subsystem: "com.playercut.app", category: "Capture")
+            .info("first frame received ✓")
     }
 }
