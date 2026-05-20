@@ -290,11 +290,23 @@ struct Stage2Result: Codable {
 
 // MARK: - Errors
 
-enum PipelineError: Error {
+enum PipelineError: Error, LocalizedError {
     case captureFailed(String)
     case stage1Failed(String)
     case stage2Failed(String)
     case compositionFailed(String)
     case noEnrollment
     case insufficientCandidates(found: Int, needed: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .captureFailed(let msg):      return "Capture failed: \(msg)"
+        case .stage1Failed(let msg):       return "Stage 1 failed: \(msg)"
+        case .stage2Failed(let msg):       return "Stage 2 failed: \(msg)"
+        case .compositionFailed(let msg):  return "Composition failed: \(msg)"
+        case .noEnrollment:                return "No enrolled player."
+        case .insufficientCandidates(let f, let n):
+            return "Only \(f) candidate moments found (need at least \(n))."
+        }
+    }
 }

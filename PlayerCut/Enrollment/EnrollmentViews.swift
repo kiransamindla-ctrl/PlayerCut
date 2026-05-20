@@ -36,6 +36,7 @@ struct EnrollmentRootView: View {
                             .font(.pcTitle)
                             .foregroundStyle(Theme.textPrimary)
                             .tracking(1.5)
+                            .accessibilityIdentifier("enrollment-step-title")
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)

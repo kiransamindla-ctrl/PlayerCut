@@ -85,7 +85,23 @@ struct CaptureView: View {
     // MARK: - Lifecycle
 
     private func onAppear() {
-        configureIfNeeded()
+        // Permission first: AVCaptureDevice creation silently fails if
+        // the user hasn't granted access, surfacing as a useless
+        // "PipelineError error 0" on the capture screen. Request both
+        // (camera AND mic — capture session needs both) explicitly
+        // before we touch the capture controller. MountDetector is fine
+        // to start either way — CMMotionManager doesn't need permission.
+        Task { @MainActor in
+            let cameraOK = await AVCaptureDevice.requestAccess(for: .video)
+            let micOK    = await AVCaptureDevice.requestAccess(for: .audio)
+            if !cameraOK || !micOK {
+                errorMessage = "Camera and microphone access are required. " +
+                    "Enable them in Settings → PlayerCut."
+                log.error("Permission denied: camera=\(cameraOK) mic=\(micOK)")
+                return
+            }
+            configureIfNeeded()
+        }
         if autoStartEnabled {
             mount.start()
             mountTask = Task { @MainActor in

@@ -30,6 +30,7 @@
 		95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24D4CA15A14D5F147D77A85 /* CaptureView.swift */; };
 		973D37FB0B8590D6F3869DDA /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36946E4469D60B7F569114E3 /* Storage.swift */; };
 		98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */; };
+		9CB02794E9FDA8DE11CFE335 /* PlayerCutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7497571612E03DE355B52CD3 /* PlayerCutUITests.swift */; };
 		AAFAFC89E3DAF7A44493BBDB /* ReelComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */; };
 		AC884A0EE2C853B09CF99F29 /* Stage1CoarseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4ABAD3A6EB6390A240D3D85 /* Stage1CoarseDetector.swift */; };
 		AD09D28462766010CD8C2FF7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 187D5FFFEF59F0D468549019 /* SettingsView.swift */; };
@@ -41,6 +42,13 @@
 
 /* Begin PBXContainerItemProxy section */
 		E2126EFA5AACE600BE4D65A8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 43076935DA8B4A669C4CFC47 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 419CE32CDB2D87A31B5DA2ED;
+			remoteInfo = PlayerCut;
+		};
+		FFB7A43E765489302221AB0E /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 43076935DA8B4A669C4CFC47 /* Project object */;
 			proxyType = 1;
@@ -66,6 +74,7 @@
 		6C213546B194076C52C3DF88 /* FrameIterator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameIterator.swift; sourceTree = "<group>"; };
 		6E7ABDAF036E48F430861357 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		6EFEA6919A4C1A6B3FA4E4E0 /* GameCaptureController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameCaptureController.swift; sourceTree = "<group>"; };
+		7497571612E03DE355B52CD3 /* PlayerCutUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerCutUITests.swift; sourceTree = "<group>"; };
 		77C451731CCFC9AEE7E5CE22 /* PlayerCut.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PlayerCut.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		852AFF8530482F6F7EA13F0F /* LabeledCorpus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabeledCorpus.swift; sourceTree = "<group>"; };
 		8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerCutApp.swift; sourceTree = "<group>"; };
@@ -77,6 +86,7 @@
 		B942A1811EDCD3B97ADF0516 /* GameDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameDetailView.swift; sourceTree = "<group>"; };
 		B99F55F63E923EEF3B3AC8B4 /* EvaluationHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvaluationHarness.swift; sourceTree = "<group>"; };
 		BC6C46A8E3983A9FFBD64A11 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C3063FA3CC843949D0A60C96 /* PlayerCutUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlayerCutUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CA0F8A80B4A9C591C60B82B5 /* PlayerCutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerCutTests.swift; sourceTree = "<group>"; };
 		CFCC38D5C5EAD3E535D6E04E /* VisionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisionPipeline.swift; sourceTree = "<group>"; };
 		D3EADFF688E91ADCEBE5E4BC /* PipelineOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineOrchestrator.swift; sourceTree = "<group>"; };
@@ -120,6 +130,7 @@
 			children = (
 				A0259B01EBCC34124B2F2FEE /* PlayerCut */,
 				682C45CB67498D2F97B7E3AC /* PlayerCutTests */,
+				CD10E65C3D936AA94FCBBC26 /* PlayerCutUITests */,
 				C87A884AA742780845570678 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -231,8 +242,17 @@
 			children = (
 				77C451731CCFC9AEE7E5CE22 /* PlayerCut.app */,
 				AE892148703051040369F4C6 /* PlayerCutTests.xctest */,
+				C3063FA3CC843949D0A60C96 /* PlayerCutUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		CD10E65C3D936AA94FCBBC26 /* PlayerCutUITests */ = {
+			isa = PBXGroup;
+			children = (
+				7497571612E03DE355B52CD3 /* PlayerCutUITests.swift */,
+			);
+			path = PlayerCutUITests;
 			sourceTree = "<group>";
 		};
 		D54D50EF72370D4492360F1B /* Capture */ = {
@@ -317,6 +337,24 @@
 			productReference = AE892148703051040369F4C6 /* PlayerCutTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		BE5FDA3308F2E198DB39374C /* PlayerCutUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1C241E76B152C551AE551202 /* Build configuration list for PBXNativeTarget "PlayerCutUITests" */;
+			buildPhases = (
+				1AC6836E88DFCFA4D40C863B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				108022EF479E7414A2A97A27 /* PBXTargetDependency */,
+			);
+			name = PlayerCutUITests;
+			packageProductDependencies = (
+			);
+			productName = PlayerCutUITests;
+			productReference = C3063FA3CC843949D0A60C96 /* PlayerCutUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -329,6 +367,10 @@
 					419CE32CDB2D87A31B5DA2ED = {
 						DevelopmentTeam = NFA3VW6VKZ;
 						ProvisioningStyle = Automatic;
+					};
+					BE5FDA3308F2E198DB39374C = {
+						DevelopmentTeam = NFA3VW6VKZ;
+						TestTargetID = 419CE32CDB2D87A31B5DA2ED;
 					};
 				};
 			};
@@ -348,11 +390,20 @@
 			targets = (
 				419CE32CDB2D87A31B5DA2ED /* PlayerCut */,
 				6F3909B82ACA0014F6A09A54 /* PlayerCutTests */,
+				BE5FDA3308F2E198DB39374C /* PlayerCutUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1AC6836E88DFCFA4D40C863B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9CB02794E9FDA8DE11CFE335 /* PlayerCutUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2108638A71EECB1C28032E8C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -400,6 +451,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		108022EF479E7414A2A97A27 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 419CE32CDB2D87A31B5DA2ED /* PlayerCut */;
+			targetProxy = FFB7A43E765489302221AB0E /* PBXContainerItemProxy */;
+		};
 		81C6CF2AAA34F87653A7958A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 419CE32CDB2D87A31B5DA2ED /* PlayerCut */;
@@ -408,6 +464,24 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		482B1AA9EDFE9BC3864EE8AA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = NFA3VW6VKZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.playercut.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PlayerCut;
+			};
+			name = Debug;
+		};
 		56846A089697FADB1EA1EB6C /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -463,6 +537,24 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_STRICT_CONCURRENCY = minimal;
 				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+		72090798ACC941571A0FBD3B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = NFA3VW6VKZ;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.playercut.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PlayerCut;
 			};
 			name = Release;
 		};
@@ -615,6 +707,15 @@
 			buildConfigurations = (
 				73D27ED6437C1AF43E78EF86 /* Debug */,
 				AD670E8D81E8F951436F342D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		1C241E76B152C551AE551202 /* Build configuration list for PBXNativeTarget "PlayerCutUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				482B1AA9EDFE9BC3864EE8AA /* Debug */,
+				72090798ACC941571A0FBD3B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

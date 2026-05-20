@@ -64,3 +64,17 @@ targets:
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/PlayerCut.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PlayerCut
         BUNDLE_LOADER: $(TEST_HOST)
         GENERATE_INFOPLIST_FILE: YES
+
+  PlayerCutUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: PlayerCutUITests
+    dependencies:
+      - target: PlayerCut
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.playercut.app.uitests
+        TEST_TARGET_NAME: PlayerCut
+        GENERATE_INFOPLIST_FILE: YES
+        DEVELOPMENT_TEAM: NFA3VW6VKZ

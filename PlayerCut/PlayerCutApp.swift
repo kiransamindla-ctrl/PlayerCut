@@ -87,6 +87,7 @@ struct RootView: View {
                             .font(.system(size: 18, weight: .bold))
                             .foregroundStyle(Theme.textPrimary)
                     }
+                    .accessibilityIdentifier("settings-gear")
                 }
             }
             .toolbarBackground(Theme.bgDark, for: .navigationBar)
@@ -135,6 +136,7 @@ struct RootView: View {
                          systemImage: "person.crop.circle.fill.badge.plus") {
                 presentingEnrollment = true
             }
+            .accessibilityIdentifier("enroll-player")
             .padding(.horizontal, 24)
             .padding(.bottom, 32)
         }
@@ -167,6 +169,7 @@ struct RootView: View {
                 .foregroundStyle(Theme.textPrimary)
                 .textCase(.uppercase)
                 .tracking(2)
+                .accessibilityIdentifier("hero-title")
             Rectangle()
                 .fill(Theme.accent)
                 .frame(width: 72, height: 6)
@@ -197,6 +200,7 @@ struct RootView: View {
                             in: RoundedRectangle(cornerRadius: Theme.Radius.card))
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("add-player")
         }
         .padding(.horizontal, 20)
     }
@@ -309,6 +313,7 @@ struct RootView: View {
                          height: 64) {
                 presentingCapture = true
             }
+            .accessibilityIdentifier("record-game")
             PCOutlinePillButton(title: "Compilation",
                                 systemImage: "sparkles",
                                 color: eligibleCompilationGames.count < 2
@@ -317,6 +322,7 @@ struct RootView: View {
                                 height: 56) {
                 presentingCompilation = true
             }
+            .accessibilityIdentifier("compilation")
             .disabled(eligibleCompilationGames.count < 2)
             .opacity(eligibleCompilationGames.count < 2 ? 0.5 : 1.0)
         }
