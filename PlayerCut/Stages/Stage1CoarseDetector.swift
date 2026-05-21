@@ -40,11 +40,54 @@ actor Stage1CoarseDetector {
         flowPool.flush()
     }
 
+    // MARK: - Pre-check
+
+    /// Verifies the raw video at `url` exists, has positive size, and
+    /// is playable. Throws a SPECIFIC `Stage1Failed("recording produced
+    /// no file")` (or similarly specific text) so the orchestrator can
+    /// surface a meaningful error to the user instead of the generic
+    /// AVAsset / FIGSANDBOX failures we'd otherwise hit downstream.
+    private func validateRawVideo(at url: URL) async throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path) else {
+            log.error("Stage 1 pre-check: raw video does NOT exist at \(url.lastPathComponent, privacy: .public)")
+            throw PipelineError.stage1Failed(
+                "recording produced no file (\(url.lastPathComponent) missing)")
+        }
+        let size: Int = {
+            guard let attrs = try? fm.attributesOfItem(atPath: url.path),
+                  let n = attrs[.size] as? NSNumber else { return 0 }
+            return n.intValue
+        }()
+        guard size > 0 else {
+            log.error("Stage 1 pre-check: raw video is 0 bytes at \(url.lastPathComponent, privacy: .public)")
+            throw PipelineError.stage1Failed(
+                "recording produced an empty file (0 bytes)")
+        }
+        let asset = AVURLAsset(url: url)
+        let playable = (try? await asset.load(.isPlayable)) ?? false
+        guard playable else {
+            log.error("Stage 1 pre-check: raw video is not playable (\(size) bytes)")
+            throw PipelineError.stage1Failed(
+                "recording file is not playable (\(size) bytes — likely an interrupted capture)")
+        }
+        log.info("Stage 1 pre-check: raw video OK, \(size) bytes, playable")
+    }
+
     // MARK: - Entry point
 
     func detect(in game: GameSession) async throws -> Stage1Result {
         let startedAt = Date()
         log.info("Stage 1 detect: starting")
+
+        // Pre-check: the raw video file must exist, be non-empty, and
+        // be playable BEFORE we burn cycles on optical-flow + audio
+        // analysis. Without this, a recording that errored mid-flight
+        // (e.g., -11872 "Cannot Record" / FigCaptureSourceRemote
+        // -17281) surfaces here as a generic AVAsset error
+        // ("operation could not be completed", -17508 FIGSANDBOX),
+        // which doesn't tell the user the recording itself failed.
+        try await validateRawVideo(at: game.rawVideoURL)
 
         // Duration-aware minimum: one candidate per 30 s of source, but
         // never less than 1. A 60-second solo-practice clip should still

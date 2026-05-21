@@ -126,19 +126,28 @@ final class GameCaptureController: NSObject {
 
         // Pick the AVCaptureDevice synchronously on the main actor so
         // we can stash it and pass it to the sessionQueue block.
+        //
+        // PRIMARY = builtInWideAngleCamera. The ultrawide on A15
+        // (iPhone 13 / 14 / 14 Plus) cannot record 4K60 via
+        // AVCaptureMovieFileOutput — preview works, but the file
+        // output errors with -11872 "Cannot Record" / FigCaptureSource
+        // -17281. The wide-angle camera on the same SoC reliably
+        // records 4K60 and 1080p60. The ultrawide is retained ONLY
+        // as a fallback in case wide is somehow unavailable (in
+        // practice never on a back-camera iPhone).
         let videoDevice: AVCaptureDevice
-        if let ultrawide = AVCaptureDevice.default(.builtInUltraWideCamera,
-                                                   for: .video,
-                                                   position: .back) {
-            videoDevice = ultrawide
-            debugInfo.selectedCamera = "ultrawide"
-            log.info("configure() video device: builtInUltraWideCamera")
-        } else if let wide = AVCaptureDevice.default(.builtInWideAngleCamera,
-                                                     for: .video,
-                                                     position: .back) {
+        if let wide = AVCaptureDevice.default(.builtInWideAngleCamera,
+                                              for: .video,
+                                              position: .back) {
             videoDevice = wide
-            debugInfo.selectedCamera = "wide (no ultrawide)"
-            log.info("configure() video device: builtInWideAngleCamera (no ultrawide)")
+            debugInfo.selectedCamera = "wide"
+            log.info("configure() video device: builtInWideAngleCamera (PRIMARY)")
+        } else if let ultrawide = AVCaptureDevice.default(.builtInUltraWideCamera,
+                                                          for: .video,
+                                                          position: .back) {
+            videoDevice = ultrawide
+            debugInfo.selectedCamera = "ultrawide (fallback, no wide!?)"
+            log.info("configure() video device: builtInUltraWideCamera (fallback)")
         } else {
             debugInfo.selectedCamera = "(none)"
             throw PipelineError.captureFailed("No back camera available")
@@ -256,10 +265,25 @@ final class GameCaptureController: NSObject {
 
     /// Recipe application body. RUNS ON sessionQueue (nonisolated so
     /// the caller can invoke it from inside the queue's async closure
-    /// without an actor hop). Sets activeFormat / locked fps / HDR off
-    /// on the device, plus re-pins codec/stabilization on the movie
-    /// output. Reports outcome to `debugInfo` via a MainActor hop.
+    /// without an actor hop).
     ///
+    /// Walks a step-down ladder of candidate (resolution, fps) pairs
+    /// and stops at the first one that BOTH (a) exists as an
+    /// AVCaptureDevice.Format on this device AND (b) reports a
+    /// non-empty `videoOutput.availableVideoCodecTypes` after
+    /// activeFormat assignment — Apple's available-codec list is the
+    /// only API that exposes whether the movie file output will
+    /// actually accept the chosen format for recording. The user's
+    /// crash diagnosis showed that 4K60 on the ultrawide passes
+    /// `resolveFormat` (the format exists) but produces -11872
+    /// "Cannot Record" at recording time. With the wide camera now
+    /// primary the ladder usually settles on the highest candidate;
+    /// the loop is a safety net for any (device, format) combination
+    /// the movie output refuses.
+    ///
+    /// Ladder (descending): 4K60 → 4K30 → 1080p60 → 1080p30. The
+    /// device-state-driven downgrade in `DeviceCapabilities.liveRecipe`
+    /// picks the starting point; the ladder only walks DOWN from there.
     /// Per the user's diagnosis: this MUST run after commitConfiguration
     /// and is NOT wrapped in another begin/commit — the session isn't
     /// running yet at this point, so activeFormat assignment doesn't
@@ -285,47 +309,56 @@ final class GameCaptureController: NSObject {
             lowPower: lowPower)
         log.info("recipe: ideal=\(initial.resolution.rawValue)@\(initial.fps), tier=\(tier.rawValue, privacy: .public)")
 
-        let (resolvedFormat, resolved) =
-            DeviceCapabilities.resolveFormat(initial, on: device)
-        guard let format = resolvedFormat else {
-            log.warning("recipe: no AVCaptureDevice.Format satisfies any step-down — staying on device default")
-            Task { @MainActor in
-                debugInfo.recipeOutcome = "NO FORMAT (running on default)"
-            }
-            return
-        }
+        // Build the candidate ladder, descending from `initial`.
+        let ladder = stepDownLadder(from: initial)
+        log.info("recipe: ladder=\(ladder.map { "\($0.resolution.rawValue)@\($0.fps)" }.joined(separator: " → "), privacy: .public)")
 
-        do {
-            try device.lockForConfiguration()
-            defer { device.unlockForConfiguration() }
+        for (attempt, candidate) in ladder.enumerated() {
+            let (resolvedFormat, resolved) =
+                DeviceCapabilities.resolveFormat(candidate, on: device)
+            guard let format = resolvedFormat else {
+                log.warning("recipe attempt \(attempt + 1): no format for \(candidate.resolution.rawValue)@\(candidate.fps) on this device — stepping down")
+                continue
+            }
 
-            device.activeFormat = format
+            do {
+                try device.lockForConfiguration()
+                defer { device.unlockForConfiguration() }
+                device.activeFormat = format
+                if format.isVideoHDRSupported {
+                    device.automaticallyAdjustsVideoHDREnabled = false
+                    device.isVideoHDREnabled = false
+                }
+                if device.isFocusModeSupported(.locked) {
+                    device.focusMode = .locked
+                }
+                if device.isExposureModeSupported(.locked) {
+                    device.exposureMode = .locked
+                }
+                if device.isWhiteBalanceModeSupported(.locked) {
+                    device.whiteBalanceMode = .locked
+                }
+                device.activeVideoMinFrameDuration =
+                    CMTime(value: 1, timescale: Int32(resolved.fps))
+                device.activeVideoMaxFrameDuration =
+                    CMTime(value: 1, timescale: Int32(resolved.fps))
+            } catch {
+                log.error("recipe attempt \(attempt + 1) (\(resolved.resolution.rawValue)@\(resolved.fps)): lockForConfig threw: \(error.localizedDescription) — stepping down")
+                continue
+            }
 
-            if format.isVideoHDRSupported {
-                device.automaticallyAdjustsVideoHDREnabled = false
-                device.isVideoHDREnabled = false
+            // Recordability check: after activeFormat assignment, the
+            // connection's available codec list is the cheapest synchronous
+            // signal that the format is actually recordable. Empty list →
+            // movie file output refuses; skip.
+            let availableCodecs = videoOutput.availableVideoCodecTypes
+            log.info("recipe attempt \(attempt + 1) (\(resolved.resolution.rawValue)@\(resolved.fps)): availableVideoCodecTypes=\(availableCodecs.map(\.rawValue).joined(separator: ","), privacy: .public)")
+            guard !availableCodecs.isEmpty else {
+                log.warning("recipe attempt \(attempt + 1): empty availableVideoCodecTypes → not recordable — stepping down")
+                continue
             }
-            if device.isFocusModeSupported(.locked) {
-                device.focusMode = .locked
-            }
-            if device.isExposureModeSupported(.locked) {
-                device.exposureMode = .locked
-            }
-            if device.isWhiteBalanceModeSupported(.locked) {
-                device.whiteBalanceMode = .locked
-            }
-            device.activeVideoMinFrameDuration =
-                CMTime(value: 1, timescale: Int32(resolved.fps))
-            device.activeVideoMaxFrameDuration =
-                CMTime(value: 1, timescale: Int32(resolved.fps))
 
-            // Skip setOutputSettings — see comment in configure().
-            // The movie output's default codec is HEVC where supported,
-            // which is what we want; passing an explicit codec here
-            // risks the uncatchable "avc1 is unsupported" NSException
-            // when the connection's available list isn't yet settled.
-            // Only the stabilization mode is set; that property doesn't
-            // throw an NSException.
+            // Recordable. Set stabilization, log, surface to overlay.
             if let conn = videoOutput.connection(with: .video) {
                 conn.preferredVideoStabilizationMode = {
                     switch resolved.stabilization {
@@ -337,9 +370,8 @@ final class GameCaptureController: NSObject {
                     }
                 }()
             }
-
-            log.info("recipe APPLIED: \(resolved.resolution.rawValue)@\(resolved.fps) (output uses default codec) stab=\(resolved.stabilization.rawValue, privacy: .public)")
-            let outcome = "APPLIED \(resolved.resolution.rawValue)@\(resolved.fps) default-codec \(resolved.stabilization.rawValue)"
+            log.info("recipe APPLIED on attempt \(attempt + 1): \(resolved.resolution.rawValue)@\(resolved.fps) stab=\(resolved.stabilization.rawValue, privacy: .public)")
+            let outcome = "APPLIED \(resolved.resolution.rawValue)@\(resolved.fps) (try \(attempt + 1)) default-codec \(resolved.stabilization.rawValue)"
             Task { @MainActor [weak controller] in
                 controller?.currentRecipe = resolved
                 debugInfo.recipeOutcome = outcome
@@ -348,12 +380,43 @@ final class GameCaptureController: NSObject {
                 await DiagnosticsStore.shared.recordEnum(
                     .captureRecipeResolution, value: resolved.resolution)
             }
-        } catch {
-            log.error("recipe apply FAILED: \(error.localizedDescription)")
-            let msg = error.localizedDescription
-            Task { @MainActor in
-                debugInfo.recipeOutcome = "FAILED: \(msg)"
-            }
+            return
+        }
+
+        // Ladder exhausted — leave device on its default format. The
+        // session is already configured and will still start; just no
+        // explicit recipe applied. Surface to the overlay.
+        log.error("recipe: all ladder attempts failed — leaving device default; recording may use whatever the camera negotiates")
+        Task { @MainActor in
+            debugInfo.recipeOutcome = "NO RECORDABLE FORMAT (\(ladder.count) attempts, on default)"
+        }
+    }
+
+    /// Descending step-down candidates starting at `start`. The order
+    /// is fixed and SoC-agnostic: 4K60 → 4K30 → 1080p60 → 1080p30.
+    /// We only emit candidates that are equal-or-less demanding than
+    /// `start` so the thermal/battery preconditioning in liveRecipe is
+    /// honored.
+    nonisolated private static func stepDownLadder(
+        from start: CaptureRecipe
+    ) -> [CaptureRecipe] {
+        let allRungs: [(CaptureRecipe.Resolution, Int)] = [
+            (.uhd4k, 60), (.uhd4k, 30),
+            (.fhd1080, 60), (.fhd1080, 30)
+        ]
+        // Find the index of the highest rung that doesn't exceed `start`.
+        let startRank: (Int, Int) = {
+            let r = start.resolution == .uhd4k ? 1 : 0
+            return (r, start.fps)
+        }()
+        return allRungs.compactMap { (res, fps) -> CaptureRecipe? in
+            let r = res == .uhd4k ? 1 : 0
+            // Skip rungs that exceed start.
+            if r > startRank.0 { return nil }
+            if r == startRank.0 && fps > startRank.1 { return nil }
+            return CaptureRecipe(resolution: res, fps: fps,
+                                 codec: start.codec,
+                                 stabilization: start.stabilization)
         }
     }
 

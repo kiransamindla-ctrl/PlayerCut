@@ -93,6 +93,22 @@ actor PipelineOrchestrator {
                     var game = try await self.store.game(id: gameId)
                     let player = try await self.store.player(id: game.playerId)
 
+                    // Poison-game skip: a game that previously failed
+                    // (e.g., the recording errored with -11872 and the
+                    // raw video is missing) must NOT be retried — it
+                    // will just fail the same way and block every
+                    // queued game behind it. The orchestrator reports
+                    // the prior failure and stops; the user can
+                    // re-record from the UI.
+                    if game.status == .failed {
+                        self.log.warning("skipping permanently-failed game \(gameId.uuidString, privacy: .public) — recorded run hit an unrecoverable error; re-record to retry")
+                        continuation.yield(.failed(
+                            PipelineError.captureFailed(
+                                "previous run failed permanently — re-record to retry")))
+                        continuation.finish()
+                        return
+                    }
+
                     await DiagnosticsStore.shared.recordDailyEvent(.appOpened)
                     await DiagnosticsStore.shared.recordEnum(.sport, value: game.sport)
                     await DiagnosticsStore.shared.recordEnum(
@@ -291,6 +307,14 @@ actor PipelineOrchestrator {
                 } catch {
                     self.log.error("Pipeline failed: \(error.localizedDescription)")
                     await DiagnosticsStore.shared.increment(.reelsFailed)
+                    // Persist .failed so the poison-game skip at the
+                    // top of run() catches this game on next launch and
+                    // doesn't waste cycles retrying the same broken
+                    // recording.
+                    if var failedGame = try? await self.store.game(id: gameId) {
+                        failedGame.status = .failed
+                        try? await self.store.upsert(failedGame)
+                    }
                     if let pe = error as? PipelineError {
                         switch pe {
                         case .captureFailed:
