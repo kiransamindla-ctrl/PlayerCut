@@ -187,15 +187,19 @@ final class GameCaptureController: NSObject {
             }
 
             if setupFailure == nil {
-                // Movie file output
+                // Movie file output. We deliberately do NOT call
+                // setOutputSettings here — that API throws an
+                // uncatchable ObjC NSException ("avc1 is unsupported")
+                // when the connection's available-codec list isn't yet
+                // settled, which terminates this thread and prevents
+                // session.startRunning() from ever being reached.
+                // AVCaptureMovieFileOutput's default codec is HEVC
+                // where supported (iOS 14+), H.264 otherwise — which
+                // matches the recipe's preference on every device we
+                // target (iPhone 13+, A15+).
                 if session.canAddOutput(videoOutput) {
                     session.addOutput(videoOutput)
                     if let conn = videoOutput.connection(with: .video) {
-                        let codec: AVVideoCodecType =
-                            videoOutput.availableVideoCodecTypes.contains(.hevc)
-                            ? .hevc : .h264
-                        videoOutput.setOutputSettings(
-                            [AVVideoCodecKey: codec], for: conn)
                         conn.preferredVideoStabilizationMode = .standard
                     }
                 }
@@ -315,13 +319,14 @@ final class GameCaptureController: NSObject {
             device.activeVideoMaxFrameDuration =
                 CMTime(value: 1, timescale: Int32(resolved.fps))
 
+            // Skip setOutputSettings — see comment in configure().
+            // The movie output's default codec is HEVC where supported,
+            // which is what we want; passing an explicit codec here
+            // risks the uncatchable "avc1 is unsupported" NSException
+            // when the connection's available list isn't yet settled.
+            // Only the stabilization mode is set; that property doesn't
+            // throw an NSException.
             if let conn = videoOutput.connection(with: .video) {
-                let codec: AVVideoCodecType =
-                    (resolved.codec == .hevc
-                     && videoOutput.availableVideoCodecTypes.contains(.hevc))
-                    ? .hevc : .h264
-                videoOutput.setOutputSettings(
-                    [AVVideoCodecKey: codec], for: conn)
                 conn.preferredVideoStabilizationMode = {
                     switch resolved.stabilization {
                     case .off:        return .off
@@ -333,8 +338,8 @@ final class GameCaptureController: NSObject {
                 }()
             }
 
-            log.info("recipe APPLIED: \(resolved.resolution.rawValue)@\(resolved.fps) \(resolved.codec.rawValue, privacy: .public)")
-            let outcome = "APPLIED \(resolved.resolution.rawValue)@\(resolved.fps) \(resolved.codec.rawValue) \(resolved.stabilization.rawValue)"
+            log.info("recipe APPLIED: \(resolved.resolution.rawValue)@\(resolved.fps) (output uses default codec) stab=\(resolved.stabilization.rawValue, privacy: .public)")
+            let outcome = "APPLIED \(resolved.resolution.rawValue)@\(resolved.fps) default-codec \(resolved.stabilization.rawValue)"
             Task { @MainActor [weak controller] in
                 controller?.currentRecipe = resolved
                 debugInfo.recipeOutcome = outcome
