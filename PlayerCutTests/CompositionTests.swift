@@ -450,6 +450,89 @@ final class ComposerFallbackRegressionTests: XCTestCase {
     }
 }
 
+// MARK: - MusicLibrary (Section 1 + Section 6 regression guard)
+
+final class MusicLibraryTests: XCTestCase {
+
+    @MainActor
+    override func setUp() async throws {
+        MusicLibrary.shared.resetRotation()
+    }
+
+    @MainActor
+    func testManifestLoadsAllTwentyTracks() {
+        let tracks = MusicLibrary.shared.allTracks
+        XCTAssertEqual(tracks.count, 20,
+                       "Manifest should list exactly 20 tracks")
+    }
+
+    @MainActor
+    func testEveryTrackResolvesToABundleURL() {
+        // The whole point of bundling the .m4a files is that
+        // MusicLibrary.Track.url is non-nil at runtime. Without this,
+        // every reel ships silent — which is exactly the Section 1
+        // failure mode this section is here to prevent.
+        for track in MusicLibrary.shared.allTracks {
+            XCTAssertNotNil(track.url,
+                "Track \(track.id) has no bundle URL — .m4a missing from Resources")
+        }
+    }
+
+    @MainActor
+    func testEveryVibeIsRepresented() {
+        let tracks = MusicLibrary.shared.allTracks
+        for vibe in MusicVibe.allCases {
+            let pool = tracks.filter { $0.vibe == vibe }
+            XCTAssertFalse(pool.isEmpty,
+                "No tracks for vibe \(vibe.rawValue)")
+        }
+    }
+
+    @MainActor
+    func testPickReturnsTrackForEveryVibe() {
+        let playerId = UUID()
+        for vibe in MusicVibe.allCases {
+            let picked = MusicLibrary.shared.pick(
+                vibe: vibe, playerId: playerId, length: .sixtySeconds)
+            XCTAssertNotNil(picked,
+                "Pick returned nil for vibe \(vibe.rawValue)")
+        }
+    }
+
+    @MainActor
+    func testLRURotationDoesNotImmediatelyRepeat() {
+        // For energetic (6 tracks), three back-to-back picks for the
+        // same player should never return the same track twice.
+        let playerId = UUID()
+        let a = MusicLibrary.shared.pick(vibe: .energetic,
+                                         playerId: playerId,
+                                         length: .sixtySeconds)
+        let b = MusicLibrary.shared.pick(vibe: .energetic,
+                                         playerId: playerId,
+                                         length: .sixtySeconds)
+        let c = MusicLibrary.shared.pick(vibe: .energetic,
+                                         playerId: playerId,
+                                         length: .sixtySeconds)
+        XCTAssertNotEqual(a?.id, b?.id,
+            "LRU rotation failed: same track twice in a row (a=b)")
+        XCTAssertNotEqual(b?.id, c?.id,
+            "LRU rotation failed: same track twice in a row (b=c)")
+    }
+
+    @MainActor
+    func testBPMSpecBaseline() {
+        // Sanity-check a handful of the BPMs the spec calls out.
+        // Catches a manifest substitution that swaps tempos under us.
+        let byId = Dictionary(uniqueKeysWithValues:
+            MusicLibrary.shared.allTracks.map { ($0.id, $0) })
+        XCTAssertEqual(byId["energetic_1"]?.bpm, 140)
+        XCTAssertEqual(byId["energetic_3"]?.bpm, 150)
+        XCTAssertEqual(byId["cinematic_3"]?.bpm, 78)
+        XCTAssertEqual(byId["playful_5"]?.bpm, 128)
+        XCTAssertEqual(byId["chill_4"]?.bpm, 80)
+    }
+}
+
 // MARK: - LUT factory
 
 final class LUTFactoryTests: XCTestCase {
