@@ -57,6 +57,24 @@ enum PhotosLibraryService {
         PHPhotoLibrary.authorizationStatus(for: .addOnly)
     }
 
+    /// Read-write authorization status. We NEVER request this — the app
+    /// is designed to be add-only. But we read the current status so we
+    /// can tell whether a read-back (album listing, asset fetch) is
+    /// safe: read APIs on PHPhotoLibrary crash without the
+    /// NSPhotoLibraryUsageDescription Info.plist key when called under
+    /// add-only authorization, even though the user "granted" access.
+    /// Only `.authorized` and `.limited` here mean reads are safe.
+    static var currentReadWriteStatus: PHAuthorizationStatus {
+        PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    }
+
+    /// True iff the library can be READ from this process without a
+    /// privacy-violation crash. Add-only never grants this.
+    static var hasReadAccess: Bool {
+        let s = currentReadWriteStatus
+        return s == .authorized || s == .limited
+    }
+
     static func label(for status: PHAuthorizationStatus) -> AuthStatusLabel {
         switch status {
         case .notDetermined: return .notDetermined
@@ -100,9 +118,18 @@ enum PhotosLibraryService {
             return .failed(error.localizedDescription)
         }
 
-        // Step 2 (optional, full access only): also add to album. This
-        // is best-effort — failures here do NOT change the outcome.
-        guard status == .authorized else {
+        // Step 2 (optional, full access only): also add to album.
+        // CRITICAL: the previous gate was `status == .authorized`
+        // where `status` came from authorizationStatus(for: .addOnly).
+        // That `.authorized` means "add-only authorized," NOT
+        // "read-write authorized" — but the album branch calls
+        // PHAssetCollection.fetchAssetCollections (a READ), which
+        // crashes the process without NSPhotoLibraryUsageDescription
+        // under add-only. We now gate on `hasReadAccess`, which
+        // queries authorizationStatus(for: .readWrite) directly and
+        // only returns true under full / limited read-write access.
+        guard hasReadAccess else {
+            log.info("Skipping album save — only add-only authorization (read APIs would crash)")
             return .savedToRecents(localIdentifier: recentsId)
         }
         do {
@@ -218,8 +245,17 @@ enum PhotosLibraryService {
     /// Best-effort PHAsset lookup. Returns nil under add-only. Used by
     /// the compilation path that already requires resolvable assets,
     /// NOT by the per-game playback path (which uses localReelURL).
+    ///
+    /// Belt-and-braces: PHAsset.fetchAssets is a READ API and crashes
+    /// the process without NSPhotoLibraryUsageDescription. We short-
+    /// circuit with `hasReadAccess` so the compilation path can never
+    /// trip the same crash that the album branch did.
     static func fetchAsset(localIdentifier: String) -> PHAsset? {
-        PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier],
-                            options: nil).firstObject
+        guard hasReadAccess else {
+            log.info("fetchAsset skipped — no read-write authorization")
+            return nil
+        }
+        return PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier],
+                                   options: nil).firstObject
     }
 }
