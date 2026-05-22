@@ -246,14 +246,18 @@ struct EditPlanBuilder {
         }
 
         if local.isEmpty {
-            return [
-                CropKeyframe(time: 0,
-                             center: CGPoint(x: 0.5, y: 0.5),
-                             scale: tighter ? 1.08 : 1.0),
-                CropKeyframe(time: duration,
-                             center: CGPoint(x: 0.5, y: 0.5),
-                             scale: tighter ? 1.08 : 1.0)
-            ]
+            // No tracker boxes → no subject to follow. Apply Ken Burns
+            // (Section 3): each clip simulates camera motion so the
+            // reel doesn't look frozen, even on a room test with no
+            // identifiable player.
+            //
+            // Direction is rotated per-clip via a hash of sourceStart
+            // so consecutive clips alternate push-in / pull-back /
+            // pan-left / pan-right — never two of the same in a row
+            // for a typical pacing.
+            return kenBurnsKeyframes(duration: duration,
+                                     anchorTime: sourceStart,
+                                     tighter: tighter)
         }
 
         // Convert to (time-from-clip-start, center, scale).
@@ -339,6 +343,53 @@ struct EditPlanBuilder {
 
     private func clamp<T: Comparable>(_ v: T, lo: T, hi: T) -> T {
         min(max(v, lo), hi)
+    }
+
+    // MARK: - Ken Burns (Section 3, no-subject fallback)
+
+    /// Two-keyframe Ken Burns motion: one of four directions chosen
+    /// by a stable hash of `anchorTime` so consecutive clips alternate
+    /// instead of all pushing the same way. Scale stays in the 1.04
+    /// → 1.20 band so the crop never starves the output of pixels.
+    private func kenBurnsKeyframes(duration: Double,
+                                   anchorTime: Double,
+                                   tighter: Bool) -> [CropKeyframe] {
+        let direction = Int((anchorTime * 100).rounded()) % 4
+        let lo: CGFloat = tighter ? 1.10 : 1.05
+        let hi: CGFloat = tighter ? 1.22 : 1.18
+        // Center offset for pans — small, so the framing stays
+        // composition-grade rather than seasick.
+        let panOffset: CGFloat = 0.05
+
+        let startCenter: CGPoint, endCenter: CGPoint
+        let startScale: CGFloat, endScale: CGFloat
+        switch direction {
+        case 0:  // push in
+            startCenter = .init(x: 0.5, y: 0.5)
+            endCenter   = .init(x: 0.5, y: 0.5)
+            startScale  = lo
+            endScale    = hi
+        case 1:  // pull back
+            startCenter = .init(x: 0.5, y: 0.5)
+            endCenter   = .init(x: 0.5, y: 0.5)
+            startScale  = hi
+            endScale    = lo
+        case 2:  // pan right (camera moves left → subject appears to move right)
+            startCenter = .init(x: 0.5 - panOffset, y: 0.5)
+            endCenter   = .init(x: 0.5 + panOffset, y: 0.5)
+            startScale  = (lo + hi) / 2
+            endScale    = (lo + hi) / 2
+        default: // pan left
+            startCenter = .init(x: 0.5 + panOffset, y: 0.5)
+            endCenter   = .init(x: 0.5 - panOffset, y: 0.5)
+            startScale  = (lo + hi) / 2
+            endScale    = (lo + hi) / 2
+        }
+        return [
+            CropKeyframe(time: 0, center: startCenter, scale: startScale),
+            CropKeyframe(time: duration,
+                         center: endCenter, scale: endScale)
+        ]
     }
 
     // MARK: - Speed curves (Part 3B)
