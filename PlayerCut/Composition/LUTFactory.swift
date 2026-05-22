@@ -64,6 +64,13 @@ enum LUTFactory {
     /// have a clear visual purpose and stay subtle (the family of
     /// "Instagram filter" overgrading is exactly what parents will
     /// reject for kids' content).
+    ///
+    /// The result of `transform` is the LUT cube's mapped value. The
+    /// MetalPetalCompositor blends this graded result with the
+    /// corrected source at ~70 % opacity (NOT 100 %) so the look
+    /// always reads "dialed in" rather than "filter dropped on top."
+    /// // SOURCE: pixflow.net 2026-02-09 — pros apply creative LUTs
+    /// // at 60-80 % opacity.
     private static func transform(r: Float, g: Float, b: Float,
                                   look: ColorLook) -> RGB {
         switch look {
@@ -83,7 +90,61 @@ enum LUTFactory {
             let cb = sigmoidContrast(b, strength: 1.07)
             let sat = saturate(r: cr, g: cg, b: cb, k: 1.04)
             return RGB(r: clamp(sat.r), g: clamp(sat.g), b: clamp(sat.b))
+        case .stadium:
+            // Teal-orange action grade. Pulls midtone blues toward
+            // teal (boost green slightly, dampen blue), warms highlights
+            // (lift red+green, dampen blue), and lifts shadows so dark
+            // jerseys still read on small screens.
+            // // SOURCE: localeyesit.com 2026-01-19 — sports
+            // // broadcast convention.
+            let cr = sigmoidContrast(r, strength: 1.16)
+            let cg = sigmoidContrast(g, strength: 1.16)
+            let cb = sigmoidContrast(b, strength: 1.16)
+            // Shadow lift (gamma 0.92 in shadows).
+            let lift = shadowLift(r: cr, g: cg, b: cb, amount: 0.08)
+            // Teal shadow → orange highlight split-tone.
+            let luma = 0.2126 * lift.r + 0.7152 * lift.g + 0.0722 * lift.b
+            // shadowWeight peaks at low luma; highlightWeight at high.
+            let shadowW = max(0, 1 - luma * 1.6)
+            let highlightW = max(0, (luma - 0.45) * 1.4)
+            // Teal: +green +blue
+            let tealG = lift.g + 0.05 * shadowW
+            let tealB = lift.b + 0.08 * shadowW
+            // Orange: +red +green
+            let orR = tealG > 0 ? lift.r + 0.10 * highlightW : lift.r
+            let orG = tealG + 0.04 * highlightW
+            let sat = saturate(r: orR, g: orG, b: tealB, k: 1.18)
+            return RGB(r: clamp(sat.r), g: clamp(sat.g), b: clamp(sat.b))
+        case .warm:
+            // Gentle cinematic — subtle warmth (+R, -B), slight
+            // shadow lift, compressed highlights to protect skin from
+            // blowing out under bright sun.
+            let cr = sigmoidContrast(r, strength: 1.10)
+            let cg = sigmoidContrast(g, strength: 1.10)
+            let cb = sigmoidContrast(b, strength: 1.10)
+            let lift = shadowLift(r: cr, g: cg, b: cb, amount: 0.06)
+            let warm = warmth(r: lift.r, g: lift.g, b: lift.b, k: 0.06)
+            // Soft highlight roll-off — pull the top 20% of luminance
+            // back toward 0.92 to avoid clipping.
+            let luma = 0.2126 * warm.r + 0.7152 * warm.g + 0.0722 * warm.b
+            let topW = max(0, (luma - 0.8) * 5)  // 0..1 over [0.8, 1.0]
+            let rolloff: Float = 0.08 * topW
+            let outR = warm.r - rolloff
+            let outG = warm.g - rolloff
+            let outB = warm.b - rolloff
+            return RGB(r: clamp(outR), g: clamp(outG), b: clamp(outB))
         }
+    }
+
+    /// Gentle shadow lift via gamma in the lower luma band. `amount`
+    /// is the additive boost at black; falls off linearly to 0 by
+    /// luma = 0.5.
+    private static func shadowLift(r: Float, g: Float, b: Float,
+                                   amount: Float) -> RGB {
+        let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        let w = max(0, 1 - lum * 2)  // weight: 1 at black, 0 at midgrey
+        let lift = amount * w
+        return RGB(r: r + lift, g: g + lift, b: b + lift)
     }
 
     private static func sigmoidContrast(_ x: Float, strength k: Float) -> Float {

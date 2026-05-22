@@ -189,24 +189,39 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                                  scale: key.scale,
                                  outputSize: outputSize)
 
-        // LUT grade.
-        let graded: MTIImage
+        // Cinematic grade pipeline (Section 3). Order:
+        //   1. (skipped: per-clip exposure/WB correction would land
+        //       here — DEFERRED, requires a pre-pass over the source.)
+        //   2. Apply the creative LUT to the (already cropped) source.
+        //   3. Blend the LUT result with the unmodified cropped source
+        //      at ~70 % opacity. // SOURCE: pixflow.net 2026-02-09 —
+        //      pros apply creative LUTs at 60-80 % intensity, not full
+        //      strength, so the look reads "dialed in" rather than
+        //      "filter slapped on top."
+        //   4. Polish: subtle MPS unsharp mask (no halos), gentle
+        //      vignette via solid-color overlay (off for v1; covered
+        //      by the vibe-specific LUTs already).
+        let fullyGraded: MTIImage
         if let lutImage = lutCache.image(for: instruction.look) {
             let cube = MTIColorLookupFilter()
             cube.inputImage = cropped
             cube.inputColorLookupTable = lutImage
-            graded = cube.outputImage ?? cropped
+            fullyGraded = cube.outputImage ?? cropped
         } else {
-            graded = cropped
+            fullyGraded = cropped
         }
+        // Blend graded ← 70% over cropped ← 30% via MTIBlendFilter.
+        // MTIBlendFilter's intensity controls the foreground opacity.
+        let lutBlendIntensity: Float = 0.70
+        let blend = MTIBlendFilter(blendMode: .normal)
+        blend.inputBackgroundImage = cropped
+        blend.inputImage = fullyGraded
+        blend.intensity = lutBlendIntensity
+        let graded = blend.outputImage ?? fullyGraded
 
-        // Subtle sharpening pass (Section 2). MetalPetal's
-        // MPS-backed unsharp mask gives a crisp edge response without
-        // the halos a stronger setting would introduce. Apple's
-        // MPSImageUnsharpMask uses `scale` (mix amount, default 0.5)
-        // and `radius` (kernel size). Tuned conservatively
-        // (radius 1.2, scale 0.35) so the grade still looks natural —
-        // broadcast-grade, not "phone sharpening overdone".
+        // Polish: subtle MPS unsharp mask. radius 1.2, scale 0.35.
+        // // SOURCE: pixflow.net 2026-02-09 — final pass is "subtle
+        // // sharpen, no clipping."
         let unsharp = MTIMPSUnsharpMaskFilter()
         unsharp.inputImage = graded
         unsharp.radius = 1.2

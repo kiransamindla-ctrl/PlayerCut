@@ -299,11 +299,16 @@ final class EditPlanBuilderTests: XCTestCase {
         XCTAssertEqual(EditStyle.defaultFor(musicVibe: .chill),     .chill)
     }
 
-    /// LUT lookup choice matches the style family.
+    /// LUT lookup choice matches the style family. Updated for the
+    /// Section 3 grade-pipeline rework:
+    ///   Energetic → Stadium (teal-orange)
+    ///   Cinematic → Warm
+    ///   Playful   → Vivid
+    ///   Chill     → Natural
     func testStyleLUTAssignment() {
-        XCTAssertEqual(EditStyle.energetic.lookUpTable, .vivid)
+        XCTAssertEqual(EditStyle.energetic.lookUpTable, .stadium)
+        XCTAssertEqual(EditStyle.cinematic.lookUpTable, .warm)
         XCTAssertEqual(EditStyle.playful.lookUpTable,   .vivid)
-        XCTAssertEqual(EditStyle.cinematic.lookUpTable, .natural)
         XCTAssertEqual(EditStyle.chill.lookUpTable,     .natural)
     }
 

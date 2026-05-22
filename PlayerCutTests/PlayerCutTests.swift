@@ -84,7 +84,10 @@ final class DeviceCapabilitiesTests: XCTestCase {
             XCTAssertEqual(r.resolution, .uhd4k, "tier \(tier)")
             XCTAssertEqual(r.fps, 60, "tier \(tier)")
             XCTAssertEqual(r.codec, .hevc, "tier \(tier)")
-            XCTAssertEqual(r.stabilization, .standard, "tier \(tier)")
+            // Section 2: A14+ now requests .cinematic; the
+            // stabilizationMode mapper downgrades at apply time if
+            // the active format doesn't support it.
+            XCTAssertEqual(r.stabilization, .cinematic, "tier \(tier)")
         }
     }
 

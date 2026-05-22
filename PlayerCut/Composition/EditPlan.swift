@@ -50,11 +50,21 @@ enum EditStyle: String, Codable, CaseIterable {
         }
     }
 
-    /// Vivid for punchy styles; Natural for cinematic and chill.
+    /// LUT per style, per the Section 3 spec:
+    ///   - Energetic → Stadium (teal-orange action grade)
+    ///   - Cinematic → Warm (gentle warmth, lifted shadows)
+    ///   - Playful → Vivid (punchy contrast + saturation)
+    ///   - Chill → Natural (neutral, gentle)
+    /// // SOURCE: localeyesit.com 2026-01-19 (teal/orange = sports);
+    /// // pixflow.net 2026-02-09 (creative LUT at 60-80% intensity —
+    /// // applied in MetalPetalCompositor via blend with corrected
+    /// // source, not at full strength).
     var lookUpTable: ColorLook {
         switch self {
-        case .energetic, .playful: return .vivid
-        case .cinematic, .chill:   return .natural
+        case .energetic: return .stadium
+        case .cinematic: return .warm
+        case .playful:   return .vivid
+        case .chill:     return .natural
         }
     }
 
@@ -72,9 +82,19 @@ enum EditStyle: String, Codable, CaseIterable {
 
 /// Bundled cinematic look. Backed by a procedurally-generated CIColorCube
 /// in LUTFactory so we don't have to ship a binary .cube file.
+///
+/// New in the quality-build (Section 3):
+///   - stadium: teal-orange action grade (push blues toward teal,
+///     boost orange in skin/highlights). The default for energetic
+///     sports content. // SOURCE: localeyesit.com 2026-01-19 — teal/
+///     orange is the broadcast palette for sports.
+///   - warm: subtle warmth + lifted shadows, slightly compressed
+///     highlights. The cinematic look without going full Hollywood.
 enum ColorLook: String, Codable {
     case vivid
     case natural
+    case stadium    // teal-orange sports
+    case warm       // gentle cinematic
 }
 
 // MARK: - Plan + child types
