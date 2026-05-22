@@ -244,9 +244,17 @@ enum DeviceCapabilities {
     /// dimensions + fps + codec. Returns nil if nothing comes close —
     /// callers step down their recipe and retry.
     ///
-    /// "Supports" here means: format dimensions match, the format has
-    /// a videoSupportedFrameRateRange covering `targetFPS`, and (when
-    /// requireHEVC) the format's mediaSubType is HEVC.
+    /// "Supports" means:
+    ///   1. Format dimensions match (must not exceed the cap).
+    ///   2. videoSupportedFrameRateRanges contains the target fps —
+    ///      RANGE-based, not exact. AVFoundation reports ranges like
+    ///      (min: 1, max: 60), so a "4K60" format is just a 4K format
+    ///      whose range *contains* 60. Apple Developer Forum threads
+    ///      document devices where exact-rate matching returns no
+    ///      results even on a camera that records 4K60 cleanly.
+    ///   3. (When requireHEVC) media subtype is hvc1 OR hev1.
+    ///      // SOURCE: Apple TN3115; AV Foundation accepts both
+    ///      // four-char codes for HEVC.
     static func bestSupportedFormat(
         for device: AVCaptureDevice,
         maxDimensions: CMVideoDimensions,
@@ -256,13 +264,17 @@ enum DeviceCapabilities {
         var bestMatch: AVCaptureDevice.Format?
         var bestArea: Int32 = 0
 
+        // 'hvc1' = 0x68766331; 'hev1' = 0x68657631. Either FourCC is HEVC.
+        let hvc1Code: FourCharCode = 0x68766331
+        let hev1Code: FourCharCode = 0x68657631
+
         for format in device.formats {
             let d = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             // Must not exceed the cap; we want the largest area that fits.
             guard d.width <= maxDimensions.width,
                   d.height <= maxDimensions.height else { continue }
 
-            // fps support
+            // Range CONTAINS targetFPS (not exact match — see above).
             let fpsOK = format.videoSupportedFrameRateRanges.contains { range in
                 Double(targetFPS) >= range.minFrameRate
                     && Double(targetFPS) <= range.maxFrameRate
@@ -271,9 +283,7 @@ enum DeviceCapabilities {
 
             if requireHEVC {
                 let subtype = CMFormatDescriptionGetMediaSubType(format.formatDescription)
-                // 'hvc1' is HEVC; treat anything else as non-HEVC.
-                let hevcCode: FourCharCode = 0x68766331  // 'hvc1'
-                guard subtype == hevcCode else { continue }
+                guard subtype == hvc1Code || subtype == hev1Code else { continue }
             }
 
             let area = d.width * d.height

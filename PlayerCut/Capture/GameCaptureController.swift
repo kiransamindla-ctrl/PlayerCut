@@ -309,20 +309,37 @@ final class GameCaptureController: NSObject {
             lowPower: lowPower)
         log.info("recipe: ideal=\(initial.resolution.rawValue)@\(initial.fps), tier=\(tier.rawValue, privacy: .public)")
 
-        // Build the candidate ladder, descending from `initial`. HEVC
-        // is tried at every rung first (HEVC at 4K30 beats H.264 at
-        // 4K60 for clarity at the same bitrate — // SOURCE: hevcut.com).
-        // Only after the entire HEVC ladder is exhausted do we fall
-        // back to H.264 at each rung.
+        // Build the candidate ladder, descending from `initial`.
+        //
+        // HARD RULE — 4K REQUIRES HEVC. iOS does not support H.264 at
+        // 4K resolution; trying to record produces error -11872
+        // "Cannot Record" and the captured FigCaptureSourceRemote
+        // -17281 the user reported.
+        // // SOURCE: videoproc.com iphone-supported-video-formats
+        // // (accessed 2026-01-30); captureguide.com iphone-video-format
+        // // (accessed 2023-10-20).
+        //
+        // Therefore the ladder steps DOWN RESOLUTION before it ever
+        // drops the codec:
+        //
+        //   HEVC 4K60 → HEVC 4K30 → HEVC 1080p60 → HEVC 1080p30
+        //   → H.264 1080p60 → H.264 1080p30
+        //
+        // The H.264 rungs are ONLY 1080p. No H.264@4K, ever.
         let hevcLadder = stepDownLadder(from: initial)
-        let h264Ladder = stepDownLadder(from: initial)
+        let h264Ladder = stepDownLadder(from: initial).filter {
+            $0.resolution == .fhd1080
+        }
         let ladderDesc = hevcLadder.map {
-            "\($0.resolution.rawValue)@\($0.fps)"
+            "HEVC \($0.resolution.rawValue)@\($0.fps)"
         }.joined(separator: " → ")
-        log.info("recipe: HEVC-strict ladder=\(ladderDesc, privacy: .public) (then H.264 fallback at same rungs)")
+        let h264Desc = h264Ladder.map {
+            "H.264 \($0.resolution.rawValue)@\($0.fps)"
+        }.joined(separator: " → ")
+        log.info("recipe: ladder=\(ladderDesc, privacy: .public) → \(h264Desc, privacy: .public)")
 
         // Build a single combined ladder: HEVC at every rung, then
-        // H.264 escape hatch at every rung.
+        // H.264 escape hatch at the 1080p rungs only.
         enum LadderRung {
             case hevc(CaptureRecipe)
             case h264Escape(CaptureRecipe)
