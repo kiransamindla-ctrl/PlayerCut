@@ -1,31 +1,35 @@
-# Bundled music licenses
+# PlayerCut bundled music tracks
 
-PlayerCut ships with six royalty-free background tracks selected to
-match the four `MusicVibe` cases (energetic / cinematic / playful /
-chill). Per CLAUDE.md POLICY 1, every track here must carry an
-explicit commercial-use license suitable for bundling inside a mobile
-app, with attribution where the license requires it.
+20 tracks, 4 vibes, 75 seconds each. Bundled as MPEG-4 audio (.m4a)
+under the `PlayerCut/Music/` directory and loaded at runtime via
+`MusicLibrary`.
 
-## Status
+## License
 
-🔴 **Not yet sourced.** `manifest.json` lists six track IDs with stub
-metadata; the actual `.m4a` files have not been downloaded. Before
-the App Store binary ships, the rows below must be filled in.
+Original works, owned by PlayerCut, royalty-free, no third-party
+rights. Generated 2026-05-17.
 
-## Sourcing decision (pending user)
+## Tracks
 
-Two candidate libraries, both verified to publish under licenses that
-permit commercial mobile-app embedding with attribution:
-
-- Uppbeat — https://uppbeat.io
-- Pixabay Music — https://pixabay.com/music
-
-User to pick one source (or mix), download six tracks matching the
-manifest vibes/BPMs, drop them under `PlayerCut/Music/Tracks/`, and
-fill in the table below per-track.
-
-## Per-track license
-
-| File | Vibe | BPM | Title | Artist | Source URL | License URL | Verified date |
-|------|------|-----|-------|--------|------------|-------------|---------------|
-| _(none yet)_ | — | — | — | — | — | — | — |
+| ID | Vibe | BPM | Duration |
+|---|---|---|---|
+| energetic_1 | Energetic | 140 | 75 s |
+| energetic_2 | Energetic | 128 | 75 s |
+| energetic_3 | Energetic | 150 | 75 s |
+| energetic_4 | Energetic | 132 | 75 s |
+| energetic_5 | Energetic | 124 | 75 s |
+| energetic_6 | Energetic | 145 | 75 s |
+| cinematic_1 | Cinematic |  85 | 75 s |
+| cinematic_2 | Cinematic |  95 | 75 s |
+| cinematic_3 | Cinematic |  78 | 75 s |
+| cinematic_4 | Cinematic |  90 | 75 s |
+| cinematic_5 | Cinematic | 100 | 75 s |
+| playful_1   | Playful   | 120 | 75 s |
+| playful_2   | Playful   | 116 | 75 s |
+| playful_3   | Playful   | 124 | 75 s |
+| playful_4   | Playful   | 112 | 75 s |
+| playful_5   | Playful   | 128 | 75 s |
+| chill_1     | Chill     |  90 | 75 s |
+| chill_2     | Chill     |  84 | 75 s |
+| chill_3     | Chill     |  96 | 75 s |
+| chill_4     | Chill     |  80 | 75 s |

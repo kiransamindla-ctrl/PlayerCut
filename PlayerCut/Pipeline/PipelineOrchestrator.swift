@@ -238,12 +238,32 @@ actor PipelineOrchestrator {
                         output: output,
                         sourceDuration: videoDuration,
                         profile: perfProfile)
+                    // Music — picked per (player, vibe) with LRU
+                    // rotation. The orchestrator's musicURL: nil arg
+                    // means "let the library pick"; an explicit URL
+                    // overrides (used by tests). NEVER allow a reel
+                    // to ship silent — the library logs loudly if
+                    // pool is empty.
+                    let pickedTrack: MusicLibrary.Track? = await MainActor.run {
+                        if musicURL != nil { return nil as MusicLibrary.Track? }
+                        return MusicLibrary.shared.pick(
+                            vibe: player.musicVibe,
+                            playerId: player.id,
+                            length: length)
+                    }
+                    let finalMusicURL = musicURL ?? pickedTrack?.url
+                    let finalMusicBPM: Double? = pickedTrack.map { Double($0.bpm) }
+                    if finalMusicURL == nil {
+                        self.log.error("MusicLibrary returned no track for vibe \(player.musicVibe.rawValue, privacy: .public) — reel will ship without music (programming error)")
+                    } else {
+                        self.log.info("Music picked: \(pickedTrack?.id ?? "<override>", privacy: .public) bpm=\(finalMusicBPM ?? 0)")
+                    }
                     let editPlan = builder.build(
                         from: plan,
                         player: player,
                         game: game,
-                        musicURL: musicURL,
-                        musicBPM: nil)
+                        musicURL: finalMusicURL,
+                        musicBPM: finalMusicBPM)
                     await DiagnosticsStore.shared.recordDuration(
                         .composePlan,
                         seconds: Date().timeIntervalSince(planBuildStart))

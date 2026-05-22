@@ -1,12 +1,147 @@
 {
-  "_TODO_LAUNCH": "Real .m4a files have not yet been sourced. See PlayerCut/Music/LICENSES.md for the licensing source decision (Uppbeat vs Pixabay).",
-  "version": 1,
   "tracks": [
-    { "id": "energetic_1", "vibe": "energetic", "bpm": 138, "durationSeconds": 180, "file": null },
-    { "id": "energetic_2", "vibe": "energetic", "bpm": 142, "durationSeconds": 180, "file": null },
-    { "id": "cinematic_1", "vibe": "cinematic", "bpm": 88,  "durationSeconds": 200, "file": null },
-    { "id": "cinematic_2", "vibe": "cinematic", "bpm": 96,  "durationSeconds": 200, "file": null },
-    { "id": "playful_1",   "vibe": "playful",   "bpm": 120, "durationSeconds": 180, "file": null },
-    { "id": "chill_1",     "vibe": "chill",     "bpm": 90,  "durationSeconds": 200, "file": null }
-  ]
+    {
+      "id": "energetic_1",
+      "file": "energetic_1.m4a",
+      "vibe": "Energetic",
+      "bpm": 140,
+      "duration": 75.0
+    },
+    {
+      "id": "energetic_2",
+      "file": "energetic_2.m4a",
+      "vibe": "Energetic",
+      "bpm": 128,
+      "duration": 75.0
+    },
+    {
+      "id": "energetic_3",
+      "file": "energetic_3.m4a",
+      "vibe": "Energetic",
+      "bpm": 150,
+      "duration": 75.0
+    },
+    {
+      "id": "energetic_4",
+      "file": "energetic_4.m4a",
+      "vibe": "Energetic",
+      "bpm": 132,
+      "duration": 75.0
+    },
+    {
+      "id": "energetic_5",
+      "file": "energetic_5.m4a",
+      "vibe": "Energetic",
+      "bpm": 124,
+      "duration": 75.0
+    },
+    {
+      "id": "energetic_6",
+      "file": "energetic_6.m4a",
+      "vibe": "Energetic",
+      "bpm": 145,
+      "duration": 75.0
+    },
+    {
+      "id": "cinematic_1",
+      "file": "cinematic_1.m4a",
+      "vibe": "Cinematic",
+      "bpm": 85,
+      "duration": 75.0
+    },
+    {
+      "id": "cinematic_2",
+      "file": "cinematic_2.m4a",
+      "vibe": "Cinematic",
+      "bpm": 95,
+      "duration": 75.0
+    },
+    {
+      "id": "cinematic_3",
+      "file": "cinematic_3.m4a",
+      "vibe": "Cinematic",
+      "bpm": 78,
+      "duration": 75.0
+    },
+    {
+      "id": "cinematic_4",
+      "file": "cinematic_4.m4a",
+      "vibe": "Cinematic",
+      "bpm": 90,
+      "duration": 75.0
+    },
+    {
+      "id": "cinematic_5",
+      "file": "cinematic_5.m4a",
+      "vibe": "Cinematic",
+      "bpm": 100,
+      "duration": 75.0
+    },
+    {
+      "id": "playful_1",
+      "file": "playful_1.m4a",
+      "vibe": "Playful",
+      "bpm": 120,
+      "duration": 75.0
+    },
+    {
+      "id": "playful_2",
+      "file": "playful_2.m4a",
+      "vibe": "Playful",
+      "bpm": 116,
+      "duration": 75.0
+    },
+    {
+      "id": "playful_3",
+      "file": "playful_3.m4a",
+      "vibe": "Playful",
+      "bpm": 124,
+      "duration": 75.0
+    },
+    {
+      "id": "playful_4",
+      "file": "playful_4.m4a",
+      "vibe": "Playful",
+      "bpm": 112,
+      "duration": 75.0
+    },
+    {
+      "id": "playful_5",
+      "file": "playful_5.m4a",
+      "vibe": "Playful",
+      "bpm": 128,
+      "duration": 75.0
+    },
+    {
+      "id": "chill_1",
+      "file": "chill_1.m4a",
+      "vibe": "Chill",
+      "bpm": 90,
+      "duration": 75.0
+    },
+    {
+      "id": "chill_2",
+      "file": "chill_2.m4a",
+      "vibe": "Chill",
+      "bpm": 84,
+      "duration": 75.0
+    },
+    {
+      "id": "chill_3",
+      "file": "chill_3.m4a",
+      "vibe": "Chill",
+      "bpm": 96,
+      "duration": 75.0
+    },
+    {
+      "id": "chill_4",
+      "file": "chill_4.m4a",
+      "vibe": "Chill",
+      "bpm": 80,
+      "duration": 75.0
+    }
+  ],
+  "license": "Original works, owned by PlayerCut. Royalty-free, no third-party rights.",
+  "generated": "2026-05-17",
+  "count": 20
 }
