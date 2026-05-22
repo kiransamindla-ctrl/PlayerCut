@@ -174,6 +174,20 @@ final class GameCaptureController: NSObject {
             session.beginConfiguration()
             session.sessionPreset = .inputPriority
 
+            // P3 wide color (Section 1 of the quality build).
+            // Apple's default `automaticallyConfiguresCaptureDeviceForWideColor`
+            // overrides whatever we set on the device to sRGB, which is
+            // what makes our capture look flatter than the stock Camera
+            // app's P3. Disable the auto-configurator here; the actual
+            // device.activeColorSpace = .P3_D65 assignment happens
+            // inside applyRecipeOnSessionQueue once activeFormat is set
+            // (a format's supportedColorSpaces only enumerates AFTER
+            // it's selected).
+            // // SOURCE: AVCaptureDevice.h header
+            // // (github xybp888/iOS-SDKs); Apple Dev Forums 681431,
+            // // accessed 2026-05-22.
+            session.automaticallyConfiguresCaptureDeviceForWideColor = false
+
             var setupFailure: String?
 
             // a→b: video input
@@ -380,6 +394,35 @@ final class GameCaptureController: NSObject {
                 try device.lockForConfiguration()
                 defer { device.unlockForConfiguration() }
                 device.activeFormat = format
+                // Wide color (Section 1) — the biggest stock-vs-PlayerCut
+                // delta per the user's sourced root-cause analysis.
+                // device.activeColorSpace defaults to sRGB when the
+                // session's automaticallyConfiguresCaptureDeviceForWideColor
+                // is true; we disabled that in configure(), now we
+                // explicitly opt into P3_D65 when the format supports it.
+                // // SOURCE: AVCaptureDevice.h header; Apple Dev Forums
+                // // 681431, accessed 2026-05-22.
+                let p3Supported = format.supportedColorSpaces
+                    .contains(.P3_D65)
+                if p3Supported {
+                    device.activeColorSpace = .P3_D65
+                } else {
+                    device.activeColorSpace = .sRGB
+                }
+                let csLabel: String = {
+                    switch device.activeColorSpace {
+                    case .P3_D65:      return "P3_D65"
+                    case .sRGB:        return "sRGB"
+                    case .HLG_BT2020:  return "HLG_BT2020"
+                    case .appleLog:    return "appleLog"
+                    @unknown default:  return "(\(device.activeColorSpace.rawValue))"
+                    }
+                }()
+                Task { @MainActor in
+                    debugInfo.colorSpace = csLabel
+                }
+                Logger(subsystem: "com.playercut.app", category: "Capture")
+                    .info("colorSpace: \(csLabel, privacy: .public) (p3 supported by format: \(p3Supported))")
                 if format.isVideoHDRSupported {
                     device.automaticallyAdjustsVideoHDREnabled = false
                     device.isVideoHDREnabled = false

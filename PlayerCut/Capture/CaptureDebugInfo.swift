@@ -59,6 +59,16 @@ final class CaptureDebugInfo: ObservableObject {
     /// the only reliable proof the pipeline is alive.
     @Published var firstFrameReceived: Bool = false
 
+    /// Active color space the device is recording in. Apple's default
+    /// is sRGB ("If automaticallyConfiguresCaptureDeviceForWideColor
+    /// is true, the session selects sRGB as the video colorspace in
+    /// your movie."); the stock Camera app records P3. We override
+    /// to P3_D65 when the chosen format supports it. Overlay shows
+    /// "P3_D65" / "sRGB" / "HLG_BT2020" so a regression to sRGB is
+    /// visible on device.
+    /// // SOURCE: AVCaptureDevice.h header; Apple Dev Forums 681431.
+    @Published var colorSpace: String = "(not set)"
+
     // ── Internals ─────────────────────────────────────────────────
 
     private var sessionErrorToken: NSObjectProtocol?

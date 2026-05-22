@@ -99,6 +99,8 @@ struct CaptureView: View {
                          coordinator.captureController.debugInfo.selectedCamera)
                 debugRow("active format",
                          coordinator.captureController.debugInfo.liveActiveFormat)
+                debugRow("color space",
+                         coordinator.captureController.debugInfo.colorSpace)
                 debugRow("AVCaptureSession error",
                          coordinator.captureController.debugInfo
                             .lastSessionRuntimeError ?? "—")
