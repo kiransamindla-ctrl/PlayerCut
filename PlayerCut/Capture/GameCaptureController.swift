@@ -309,15 +309,53 @@ final class GameCaptureController: NSObject {
             lowPower: lowPower)
         log.info("recipe: ideal=\(initial.resolution.rawValue)@\(initial.fps), tier=\(tier.rawValue, privacy: .public)")
 
-        // Build the candidate ladder, descending from `initial`.
-        let ladder = stepDownLadder(from: initial)
-        log.info("recipe: ladder=\(ladder.map { "\($0.resolution.rawValue)@\($0.fps)" }.joined(separator: " → "), privacy: .public)")
+        // Build the candidate ladder, descending from `initial`. HEVC
+        // is tried at every rung first (HEVC at 4K30 beats H.264 at
+        // 4K60 for clarity at the same bitrate — // SOURCE: hevcut.com).
+        // Only after the entire HEVC ladder is exhausted do we fall
+        // back to H.264 at each rung.
+        let hevcLadder = stepDownLadder(from: initial)
+        let h264Ladder = stepDownLadder(from: initial)
+        let ladderDesc = hevcLadder.map {
+            "\($0.resolution.rawValue)@\($0.fps)"
+        }.joined(separator: " → ")
+        log.info("recipe: HEVC-strict ladder=\(ladderDesc, privacy: .public) (then H.264 fallback at same rungs)")
 
-        for (attempt, candidate) in ladder.enumerated() {
-            let (resolvedFormat, resolved) =
-                DeviceCapabilities.resolveFormat(candidate, on: device)
+        // Build a single combined ladder: HEVC at every rung, then
+        // H.264 escape hatch at every rung.
+        enum LadderRung {
+            case hevc(CaptureRecipe)
+            case h264Escape(CaptureRecipe)
+            var recipe: CaptureRecipe {
+                switch self {
+                case .hevc(let r), .h264Escape(let r): return r
+                }
+            }
+            var label: String {
+                switch self {
+                case .hevc(let r):
+                    return "HEVC \(r.resolution.rawValue)@\(r.fps)"
+                case .h264Escape(let r):
+                    return "H.264 \(r.resolution.rawValue)@\(r.fps)"
+                }
+            }
+        }
+        let combined: [LadderRung] =
+            hevcLadder.map { .hevc($0) } + h264Ladder.map { .h264Escape($0) }
+
+        for (attempt, rung) in combined.enumerated() {
+            let (resolvedFormat, resolved): (AVCaptureDevice.Format?,
+                                             CaptureRecipe) = {
+                switch rung {
+                case .hevc(let r):
+                    return DeviceCapabilities.resolveFormat(r, on: device)
+                case .h264Escape(let r):
+                    return DeviceCapabilities
+                        .resolveFormatAllowingH264(r, on: device)
+                }
+            }()
             guard let format = resolvedFormat else {
-                log.warning("recipe attempt \(attempt + 1): no format for \(candidate.resolution.rawValue)@\(candidate.fps) on this device — stepping down")
+                log.warning("recipe attempt \(attempt + 1) (\(rung.label, privacy: .public)): no format on this device — stepping down")
                 continue
             }
 
@@ -370,8 +408,8 @@ final class GameCaptureController: NSObject {
                     }
                 }()
             }
-            log.info("recipe APPLIED on attempt \(attempt + 1): \(resolved.resolution.rawValue)@\(resolved.fps) stab=\(resolved.stabilization.rawValue, privacy: .public)")
-            let outcome = "APPLIED \(resolved.resolution.rawValue)@\(resolved.fps) (try \(attempt + 1)) default-codec \(resolved.stabilization.rawValue)"
+            log.info("recipe APPLIED on attempt \(attempt + 1) (\(rung.label, privacy: .public)): \(resolved.resolution.rawValue)@\(resolved.fps) codec=\(resolved.codec.rawValue, privacy: .public) stab=\(resolved.stabilization.rawValue, privacy: .public)")
+            let outcome = "APPLIED \(resolved.resolution.rawValue)@\(resolved.fps) \(resolved.codec.rawValue) (try \(attempt + 1)) \(resolved.stabilization.rawValue)"
             Task { @MainActor [weak controller] in
                 controller?.currentRecipe = resolved
                 debugInfo.recipeOutcome = outcome
@@ -388,7 +426,7 @@ final class GameCaptureController: NSObject {
         // explicit recipe applied. Surface to the overlay.
         log.error("recipe: all ladder attempts failed — leaving device default; recording may use whatever the camera negotiates")
         Task { @MainActor in
-            debugInfo.recipeOutcome = "NO RECORDABLE FORMAT (\(ladder.count) attempts, on default)"
+            debugInfo.recipeOutcome = "NO RECORDABLE FORMAT (\(combined.count) attempts, on default)"
         }
     }
 

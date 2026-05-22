@@ -190,13 +190,28 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                                  outputSize: outputSize)
 
         // LUT grade.
-        guard let lutImage = lutCache.image(for: instruction.look) else {
-            return cropped
+        let graded: MTIImage
+        if let lutImage = lutCache.image(for: instruction.look) {
+            let cube = MTIColorLookupFilter()
+            cube.inputImage = cropped
+            cube.inputColorLookupTable = lutImage
+            graded = cube.outputImage ?? cropped
+        } else {
+            graded = cropped
         }
-        let cube = MTIColorLookupFilter()
-        cube.inputImage = cropped
-        cube.inputColorLookupTable = lutImage
-        return cube.outputImage ?? cropped
+
+        // Subtle sharpening pass (Section 2). MetalPetal's
+        // MPS-backed unsharp mask gives a crisp edge response without
+        // the halos a stronger setting would introduce. Apple's
+        // MPSImageUnsharpMask uses `scale` (mix amount, default 0.5)
+        // and `radius` (kernel size). Tuned conservatively
+        // (radius 1.2, scale 0.35) so the grade still looks natural —
+        // broadcast-grade, not "phone sharpening overdone".
+        let unsharp = MTIMPSUnsharpMaskFilter()
+        unsharp.inputImage = graded
+        unsharp.radius = 1.2
+        unsharp.scale = 0.35
+        return unsharp.outputImage ?? graded
     }
 
     /// Center-crops + scales the source image to exactly `outputSize`.

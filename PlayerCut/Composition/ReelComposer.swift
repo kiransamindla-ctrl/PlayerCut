@@ -313,15 +313,28 @@ final class ReelComposer {
         }
 
         // ─── Stage: exportSetup ─────────────────────────────────────
+        // Prefer AVAssetExportPresetHEVC1920x1080 — it targets ~14 Mbps
+        // HEVC at 1080p, materially crisper than AVAssetExportPreset
+        // HighestQuality's default rate (~6 Mbps) for the same pixel
+        // count. // SOURCE: Apple AVAssetExportSession docs, Apple TN3115.
+        // The earlier concern (HEVC1920x1080 rejecting 4K source) is
+        // moot here because the renderSize of the videoComposition is
+        // already 1080p — the preset gates on the composition output,
+        // not the source asset.
+        // Fall back to HighestQuality if the device declares HEVC1920x1080
+        // incompatible with the constructed composition for any reason.
         let session: AVAssetExportSession
         do {
-            // AVAssetExportPresetHighestQuality is compatible with
-            // custom compositors at arbitrary input resolutions —
-            // unlike the fixed-resolution HEVC presets which reject
-            // the composition when source is 4K (Section 2.1, bug C).
+            let compatible = AVAssetExportSession.exportPresets(
+                compatibleWith: composition)
+            let chosenPreset: String =
+                compatible.contains(AVAssetExportPresetHEVC1920x1080)
+                ? AVAssetExportPresetHEVC1920x1080
+                : AVAssetExportPresetHighestQuality
+            log.info("Export preset: \(chosenPreset, privacy: .public)")
             guard let s = AVAssetExportSession(
                 asset: composition,
-                presetName: AVAssetExportPresetHighestQuality) else {
+                presetName: chosenPreset) else {
                 throw PipelineError.compositionFailed(
                     "Export session init failed")
             }

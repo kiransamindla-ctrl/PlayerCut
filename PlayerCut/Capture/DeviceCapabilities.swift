@@ -286,58 +286,46 @@ enum DeviceCapabilities {
     }
 
     /// Resolves a recipe to a concrete AVCaptureDevice.Format on the
-    /// given device, stepping down as needed:
-    ///   1. Ideal recipe at HEVC.
-    ///   2. Same recipe but H.264 acceptable (logs the codec fallback).
-    ///   3. 30fps at the same resolution.
-    ///   4. 1080p30 HEVC.
-    /// If nothing matches we return (nil, original recipe) and the
-    /// caller surfaces a captureFailed error.
+    /// given device. **HEVC-strict** — the caller's recordability
+    /// ladder (GameCaptureController.applyRecipeOnSessionQueue) is the
+    /// place where resolution+fps step-down happens. This function only
+    /// answers "does this exact (res, fps) exist as an HEVC format on
+    /// this device?". HEVC is ~2× more bandwidth-efficient than H.264
+    /// at equal quality (// SOURCE: hevcut.com iphone-video-recording-
+    /// settings-optimization, accessed 2026-05-17), so we prefer HEVC
+    /// at a LOWER rung over H.264 at a HIGHER rung.
+    ///
+    /// Returns (nil, recipe) when no HEVC format matches. The outer
+    /// ladder then steps down to the next rung. If the entire ladder
+    /// finds no HEVC format, only then do we fall through to the
+    /// H.264 escape hatch via `resolveFormatAllowingH264`.
     static func resolveFormat(_ recipe: CaptureRecipe,
                               on device: AVCaptureDevice)
         -> (format: AVCaptureDevice.Format?, recipe: CaptureRecipe) {
+        if let f = bestSupportedFormat(for: device,
+                                       maxDimensions: recipe.resolution.dimensions,
+                                       targetFPS: recipe.fps,
+                                       requireHEVC: true) {
+            return (f, recipe)
+        }
+        return (nil, recipe)
+    }
 
+    /// Escape hatch — called by the ladder ONLY after the HEVC-strict
+    /// ladder has exhausted every rung. Returns the highest H.264
+    /// format that matches the recipe's resolution + fps, with the
+    /// recipe's codec field flipped to .h264 so the rest of the
+    /// pipeline knows.
+    static func resolveFormatAllowingH264(_ recipe: CaptureRecipe,
+                                          on device: AVCaptureDevice)
+        -> (format: AVCaptureDevice.Format?, recipe: CaptureRecipe) {
         var attempt = recipe
-
-        // 1. Ideal HEVC.
         if let f = bestSupportedFormat(for: device,
-                                       maxDimensions: attempt.resolution.dimensions,
-                                       targetFPS: attempt.fps,
-                                       requireHEVC: true) {
-            return (f, attempt)
-        }
-
-        // 2. Same resolution + fps, allow H.264.
-        if let f = bestSupportedFormat(for: device,
-                                       maxDimensions: attempt.resolution.dimensions,
-                                       targetFPS: attempt.fps,
+                                       maxDimensions: recipe.resolution.dimensions,
+                                       targetFPS: recipe.fps,
                                        requireHEVC: false) {
-            log.warning("Recipe \(attempt.resolution.rawValue)@\(attempt.fps): HEVC unavailable, dropping to H.264")
             attempt.codec = .h264
-            return (f, attempt)
-        }
-
-        // 3. Drop fps to 30.
-        if attempt.fps != 30 {
-            attempt.fps = 30
-            if let f = bestSupportedFormat(for: device,
-                                           maxDimensions: attempt.resolution.dimensions,
-                                           targetFPS: 30,
-                                           requireHEVC: true) {
-                log.warning("Recipe stepped down: \(recipe.fps)fps → 30fps")
-                return (f, attempt)
-            }
-        }
-
-        // 4. Final fallback: 1080p30 HEVC.
-        attempt = CaptureRecipe(resolution: .fhd1080, fps: 30,
-                                codec: .hevc,
-                                stabilization: recipe.stabilization)
-        if let f = bestSupportedFormat(for: device,
-                                       maxDimensions: attempt.resolution.dimensions,
-                                       targetFPS: 30,
-                                       requireHEVC: true) {
-            log.warning("Recipe stepped down to floor: 1080p30 HEVC")
+            log.warning("HEVC ladder exhausted — falling back to H.264 \(recipe.resolution.rawValue)@\(recipe.fps)")
             return (f, attempt)
         }
         return (nil, recipe)
