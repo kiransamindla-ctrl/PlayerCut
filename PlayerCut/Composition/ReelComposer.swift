@@ -62,9 +62,20 @@ final class ReelComposer {
     /// Cross-clip blend duration. Compositor clamps to ≤ 25 % of the
     /// shorter of the two clip's rendered duration.
     var transitionDuration: Double = 0.45
+    // Mix levels (Section 5 — "music bed + low game-audio underneath
+    // + smoother ducking"):
+    //   - Music sits at -8.5 dB so the bed reads as polished rather
+    //     than competing with the game audio. // SOURCE: ITU-R BS.1770
+    //     loudness targets; iOS broadcast convention.
+    //   - Game audio drops to a SUPPORTING bed level (~0.30 → -10 dB)
+    //     so crowd/ball noise is audibly present underneath but never
+    //     fights the music. The old default 1.0 made every recording
+    //     feel "raw clip" instead of "edited reel".
+    //   - When game audio peaks (audioDuckRanges) the music dips a
+    //     full -12 dB below bed (musicBedVolume × 10^(-12/20) ≈ 0.10).
     var musicBedVolume: Float = 0.40        // -8.5 dB ≈ 0.376; rounded
-    var musicDuckVolume: Float = 0.08       // -22 dB ≈ 0.079; rounded
-    var gameAudioVolume: Float = 1.0
+    var musicDuckVolume: Float = 0.10       // -12 dB below bed; ITU-R-ish
+    var gameAudioVolume: Float = 0.30       // -10 dB under music bed
 
     /// MTIContext used for rasterizing CALayer-based cards into MTIImages.
     /// Lazily created so unit tests that never call compose() don't pay
@@ -287,21 +298,23 @@ final class ReelComposer {
         if let musicTrack {
             let params = AVMutableAudioMixInputParameters(track: musicTrack)
             params.setVolume(musicBedVolume, at: .zero)
+            // Smoother attack/release on the duck envelope: 350 ms in,
+            // 550 ms out — feels less robotic than the old 250/400 ms.
+            // // SOURCE: typical broadcast duck envelopes (250-500 ms
+            // // attack, 500-900 ms release) sit at this scale.
+            let duckAttack = CMTime(seconds: 0.35, preferredTimescale: 600)
+            let duckRelease = CMTime(seconds: 0.55, preferredTimescale: 600)
             for range in audioDuckRanges {
                 params.setVolumeRamp(
                     fromStartVolume: musicBedVolume,
                     toEndVolume: musicDuckVolume,
-                    timeRange: CMTimeRange(
-                        start: range.start,
-                        duration: CMTime(seconds: 0.25,
-                                         preferredTimescale: 600)))
+                    timeRange: CMTimeRange(start: range.start,
+                                           duration: duckAttack))
                 params.setVolumeRamp(
                     fromStartVolume: musicDuckVolume,
                     toEndVolume: musicBedVolume,
-                    timeRange: CMTimeRange(
-                        start: range.end,
-                        duration: CMTime(seconds: 0.4,
-                                         preferredTimescale: 600)))
+                    timeRange: CMTimeRange(start: range.end,
+                                           duration: duckRelease))
             }
             let fadeStart = CMTime(seconds: max(0, lastBodyOutputEnd),
                                    preferredTimescale: 600)
