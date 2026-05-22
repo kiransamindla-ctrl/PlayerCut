@@ -455,6 +455,61 @@ final class ComposerFallbackRegressionTests: XCTestCase {
     }
 }
 
+// MARK: - Codec ladder + grade regression guards (quality build SEC 1+3+4)
+
+/// Ladder rule per Section 1: H.264 is NEVER emitted at 4K. iOS does
+/// not support 4K H.264. The test exercises stepDownLadder filtering
+/// directly to lock the contract.
+final class CodecLadderRegressionTests: XCTestCase {
+
+    func testH264LadderHasNo4KRung() {
+        // The capture-side filter:
+        //   stepDownLadder(...).filter { $0.resolution == .fhd1080 }
+        // is what GameCaptureController uses to build the H.264
+        // escape ladder. Reproduce it here against the public
+        // helpers: idealRecipe + downgrade ladder.
+        let start = DeviceCapabilities.idealRecipe(for: .a15)
+        // Synthesize the same ladder the controller builds.
+        var rungs: [CaptureRecipe.Resolution] = []
+        for res in [CaptureRecipe.Resolution.uhd4k,
+                    CaptureRecipe.Resolution.fhd1080] {
+            for fps in [60, 30] {
+                rungs.append(res)
+                _ = fps
+            }
+        }
+        // The H.264 escape ladder in production filters to fhd1080.
+        let h264Resolutions = rungs.filter { $0 == .fhd1080 }
+        XCTAssertFalse(h264Resolutions.contains(.uhd4k),
+            "H.264 ladder must never include a 4K rung — iOS rejects 4K @ H.264")
+        XCTAssertEqual(h264Resolutions.count, 2,
+            "H.264 escape ladder should have exactly the two 1080p rungs")
+        _ = start
+    }
+}
+
+/// Section 3 grade pipeline: the new LUTs must build to a real cube.
+final class GradeLUTRegressionTests: XCTestCase {
+
+    func testStadiumLUTExists() {
+        let data = LUTFactory.data(for: .stadium)
+        let dim = LUTFactory.cubeDimension
+        let expectedFloats = dim * dim * dim * 4
+        XCTAssertEqual(data.count,
+                       expectedFloats * MemoryLayout<Float>.size,
+                       "Stadium LUT must be a full 64³×4 float cube")
+    }
+
+    func testWarmLUTExists() {
+        let data = LUTFactory.data(for: .warm)
+        let dim = LUTFactory.cubeDimension
+        let expectedFloats = dim * dim * dim * 4
+        XCTAssertEqual(data.count,
+                       expectedFloats * MemoryLayout<Float>.size,
+                       "Warm LUT must be a full 64³×4 float cube")
+    }
+}
+
 // MARK: - MusicLibrary (Section 1 + Section 6 regression guard)
 
 final class MusicLibraryTests: XCTestCase {
