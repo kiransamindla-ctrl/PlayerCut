@@ -111,6 +111,14 @@ struct EditPlanBuilder {
         let beatGrid = makeBeatGrid(bpm: bpm,
                                     spanSeconds: 60 * 6) // 6 min ceiling
 
+        // Beat-snap (Section 4): adjust each body clip's sourceEnd so
+        // its RENDERED duration (post-speedCurve) is a whole-beat
+        // multiple — landing every cut on the music. Fast tracks
+        // (>130 BPM) snap to half-beats so the pacing doesn't feel
+        // stiff. Cold open + cards are left unsnapped; the ramped
+        // cold-open intentionally swallows the first downbeat.
+        let snappedBody = snapToBeats(body, bpm: bpm)
+
         let titleCard = makeTitleCard(player: player, game: game)
         let lowerThird = LowerThirdSpec(
             primaryText: player.name.uppercased(),
@@ -125,13 +133,67 @@ struct EditPlanBuilder {
                         },
                         titleCard: titleCard,
                         lowerThird: lowerThird,
-                        body: body,
+                        body: snappedBody,
                         closingCard: closing,
                         beatGrid: beatGrid,
                         style: style,
                         output: output,
                         musicURL: musicURL,
                         sourceTier: plan.tier)
+    }
+
+    // MARK: - Beat-snap (Section 4)
+
+    /// Returns body clips whose RENDERED duration (post-speedCurve)
+    /// has been quantised to the music's beat grid. Each clip's
+    /// sourceEnd is adjusted so:
+    ///
+    ///   rendered = round(rendered / snapUnit) * snapUnit
+    ///
+    /// where snapUnit is a beat for normal tracks and a half-beat for
+    /// fast tracks (>130 BPM) so the pacing doesn't feel stiff.
+    /// SpeedCurve's `factor` is honored — for a slow-mo apex clip,
+    /// the rendered duration includes the stretch, so the SNAP lands
+    /// on the rendered timeline, not the source timeline.
+    ///
+    /// Conservative: clamps minimum at 2 beats, skips clips whose
+    /// new sourceDur would be < 1.0 s (avoid creating sub-second
+    /// stubs after over-aggressive snapping), and never extends a
+    /// clip past its original sourceEnd (only trims).
+    private func snapToBeats(_ clips: [ClipPlan],
+                             bpm: Double) -> [ClipPlan] {
+        let beatPeriod = 60.0 / bpm
+        let snapUnit = bpm > 130 ? beatPeriod / 2 : beatPeriod
+        let log = Logger(subsystem: "com.playercut.app", category: "BeatSnap")
+        log.info("beat-snap: bpm=\(bpm, format: .fixed(precision: 1)) beat=\(beatPeriod, format: .fixed(precision: 3))s snapUnit=\(snapUnit, format: .fixed(precision: 3))s")
+
+        return clips.map { clip in
+            let segments = clip.speedCurve.segments
+            // k = sum((fracEnd - fracStart) / factor)
+            // rendered = sourceDur * k
+            let k = segments.reduce(0.0) { acc, s in
+                acc + (s.sourceFractionEnd - s.sourceFractionStart)
+                    / max(0.01, s.factor)
+            }
+            guard k > 0 else { return clip }
+            let currentRendered = clip.sourceDuration * k
+            let beats = max(2.0,
+                            (currentRendered / snapUnit).rounded())
+            let targetRendered = beats * snapUnit
+            let newSourceDur = targetRendered / k
+            guard newSourceDur >= 1.0 else {
+                log.warning("beat-snap: skipping clip (sourceDur \(newSourceDur, format: .fixed(precision: 2))s < 1.0s after snap)")
+                return clip
+            }
+            // Don't extend past the original sourceEnd — only trim.
+            guard newSourceDur <= clip.sourceDuration else {
+                return clip
+            }
+            var snapped = clip
+            snapped.sourceEnd = clip.sourceStart + newSourceDur
+            log.info("beat-snap: \(currentRendered, format: .fixed(precision: 2))s → \(targetRendered, format: .fixed(precision: 2))s (\(Int(beats)) beats)")
+            return snapped
+        }
     }
 
     // MARK: - Cold open
