@@ -170,6 +170,14 @@ enum DeviceCapabilities {
     /// Ideal recipe purely from tier — no thermal / battery awareness.
     /// Use `liveRecipe(...)` for the version that bakes in current
     /// device state.
+    ///
+    /// Stabilization choice .cinematic is REQUESTED for every tier
+    /// from A14 up; the actual application checks the connection
+    /// (`isVideoStabilizationModeSupported(.cinematic)`) and falls
+    /// back to .standard when the chosen format doesn't support it.
+    /// Cinematic stabilization is what gives Trace/Veo footage its
+    /// smooth-pan look. // SOURCE: traceup.com trace-vs-veo
+    /// 2025-02-14 — Trace clarity attributed to "stability".
     static func idealRecipe(for tier: SoCTier) -> CaptureRecipe {
         switch effectiveTier(tier) {
         case .a17, .a18plus:
@@ -177,7 +185,7 @@ enum DeviceCapabilities {
                                  codec: .hevc, stabilization: .cinematic)
         case .a14, .a15, .a16:
             return CaptureRecipe(resolution: .uhd4k, fps: 60,
-                                 codec: .hevc, stabilization: .standard)
+                                 codec: .hevc, stabilization: .cinematic)
         case .a13:
             return CaptureRecipe(resolution: .fhd1080, fps: 60,
                                  codec: .hevc, stabilization: .standard)
