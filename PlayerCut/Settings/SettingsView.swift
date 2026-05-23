@@ -16,17 +16,10 @@ enum SettingsKeys {
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
-    // OFF by default — auto-start is a secondary convenience that
-    // runs alongside (never instead of) the manual record button.
-    @AppStorage(SettingsKeys.autoStartEnabled) private var autoStartEnabled = false
-    @AppStorage(SettingsKeys.autoStopEnabled)  private var autoStopEnabled  = true
-    /// Experimental AVAssetWriter recording path (Section 2 of the
-    /// stock-quality build). Default OFF — flip on to A/B against the
-    /// legacy AVCaptureMovieFileOutput path during the side-by-side
-    /// device gate. Once verified on hardware, the legacy path will
-    /// be removed and this toggle disappears.
-    @AppStorage(WriterCaptureFlag.defaultsKey)
-    private var writerCaptureEnabled = false
+    // Capture-side toggles were removed when PlayerCut switched to the
+    // system camera (UIImagePickerController). Auto-start, auto-stop,
+    // and the experimental writer-capture path were all features of
+    // the retired custom AVCaptureSession.
 
     @State private var presentingDiagnostics = false
 
@@ -37,42 +30,8 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         BackgroundRefreshBanner()
-                        sectionHeader("Capture automation")
-                        VStack(spacing: 0) {
-                            settingsRow {
-                                Toggle("Auto-start when mounted",
-                                       isOn: $autoStartEnabled)
-                                    .tint(Theme.accent)
-                                    .font(.pcBody)
-                                    .foregroundStyle(Theme.textPrimary)
-                            }
-                            Divider().background(Theme.bgDark)
-                            settingsRow {
-                                Toggle("Auto-stop when motion stops",
-                                       isOn: $autoStopEnabled)
-                                    .tint(Theme.accent)
-                                    .font(.pcBody)
-                                    .foregroundStyle(Theme.textPrimary)
-                            }
-                        }
-                        .pcCard()
-                        Text("When auto-start is on, PlayerCut watches for the phone being placed on a tripod and begins recording after a 3-second grace period.")
-                            .font(.pcCaption)
-                            .foregroundStyle(Theme.textSecondary)
-                            .padding(.horizontal, 4)
-
-                        sectionHeader("Experimental")
-                        VStack(spacing: 0) {
-                            settingsRow {
-                                Toggle("Writer-based capture (HEVC ~45 Mbps)",
-                                       isOn: $writerCaptureEnabled)
-                                    .tint(Theme.accent)
-                                    .font(.pcBody)
-                                    .foregroundStyle(Theme.textPrimary)
-                            }
-                        }
-                        .pcCard()
-                        Text("Records via AVCaptureVideoDataOutput + AVAssetWriter to match the stock Camera app's bitrate and color tagging. Default OFF until verified side-by-side on device. Flip ON, record a clip, compare with the stock Camera, then leave on or flip off based on what looks better.")
+                        sectionHeader("Capture")
+                        Text("PlayerCut uses the iPhone's system Camera for recording — the same UI as the stock Camera app. Tap Record on the home screen, the system camera opens, record and stop yourself, then PlayerCut produces the highlight reel.")
                             .font(.pcCaption)
                             .foregroundStyle(Theme.textSecondary)
                             .padding(.horizontal, 4)

@@ -161,7 +161,7 @@ actor Stage1CoarseDetector {
                                   sigma: Float) async throws -> [CandidateWindow] {
         log.info("Stage 1 audio: reading loudness file")
         let data = try Data(contentsOf: loudnessURL)
-        let samples = try JSONDecoder().decode([GameCaptureController.LoudnessSample].self,
+        let samples = try JSONDecoder().decode([LoudnessSample].self,
                                                from: data)
         log.info("Stage 1 audio: \(samples.count) loudness samples")
         guard samples.count > 20 else { return [] }

@@ -150,6 +150,32 @@ enum PhotosLibraryService {
         }
     }
 
+    /// Add-only save of an arbitrary source video the parent recorded
+    /// via the system camera. Unlike `saveReel`, this never tries to
+    /// reach the album branch (which requires read-write authorization);
+    /// it just lands a copy in Recents. Returns the same SaveOutcome
+    /// shape so callers can log uniformly.
+    static func saveSourceVideo(fileURL: URL) async -> SaveOutcome {
+        var status = currentAddOnlyStatus
+        if status == .notDetermined {
+            status = await requestAddOnlyAuthorization()
+        }
+        guard status == .authorized || status == .limited else {
+            log.warning("Photos add-only auth denied for source video")
+            await DiagnosticsStore.shared
+                .increment(.photoLibraryPermissionDenied)
+            return .permissionDenied
+        }
+        do {
+            let id = try await performRecentsSave(fileURL: fileURL)
+            log.info("Saved source video to Photos Recents: \(id ?? "<no id>")")
+            return .savedToRecents(localIdentifier: id)
+        } catch {
+            log.error("Source-video save failed: \(error.localizedDescription)")
+            return .failed(error.localizedDescription)
+        }
+    }
+
     // MARK: - Internals: Recents save (add-only safe)
 
     private static func performRecentsSave(fileURL: URL) async throws -> String? {

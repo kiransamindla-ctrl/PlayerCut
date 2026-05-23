@@ -22,21 +22,7 @@ struct PlayerCutApp: App {
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
                 .task {
-                    // On every launch, restore brightness if a previous
-                    // session left it dimmed. Belt-and-braces — the per-
-                    // view scenePhase handler also restores, but a hard
-                    // termination during recording skips that path.
-                    BrightnessKeeper.restore()
                     await coordinator.bootstrap()
-                }
-                .onChange(of: scenePhase) { _, new in
-                    // Whenever the app leaves the foreground, force a
-                    // brightness restore. Re-dim is owned by CaptureView
-                    // on return, since dim is only meaningful while a
-                    // recording is in progress.
-                    if new == .background || new == .inactive {
-                        BrightnessKeeper.restore()
-                    }
                 }
         }
     }
@@ -46,7 +32,9 @@ struct PlayerCutApp: App {
 final class AppCoordinator: ObservableObject {
     let store = GameStore()
     lazy var orchestrator = PipelineOrchestrator(store: store)
-    let captureController = GameCaptureController()
+    // captureController removed — PlayerCut no longer owns an
+    // AVCaptureSession. The system Camera (UIImagePickerController)
+    // owns capture; see CaptureView.
 
     @Published var games: [GameSession] = []
     @Published var players: [PlayerEnrollment] = []
