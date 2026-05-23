@@ -709,16 +709,15 @@ final class GameCaptureController: NSObject {
             }
             return .off
         case .cinematic:
-            // Walk the preferred ladder: extended → cinematic → standard.
+            // Walk the preferred ladder: cinematicExtended → cinematic
+            // → standard. We can't probe per-mode support via
+            // AVCaptureConnection's public surface in iOS 17+
+            // (// SOURCE: Apple Dev Forums 735899), so we ASSIGN the
+            // strongest mode and let AVFoundation silently downgrade
+            // to a supported mode on this format. Worst case we get
+            // .standard back at frame time — still better than .off.
             if connection.isVideoStabilizationSupported {
-                // Per-mode probe via AVCaptureDevice.Format API isn't
-                // exposed on AVCaptureConnection in iOS 17+; we trust
-                // the general isVideoStabilizationSupported and let
-                // AVFoundation pick a sensible value from the modes the
-                // active format supports when we assign .cinematic.
-                // If the assignment is silently downgraded, the camera
-                // still records — just with slightly less smoothing.
-                return .cinematic
+                return .cinematicExtended
             }
             return .off
         }
