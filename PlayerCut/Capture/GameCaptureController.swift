@@ -168,6 +168,17 @@ final class GameCaptureController: NSObject {
         self.videoDevice = videoDevice
         observeThermalAndBattery()
 
+        // One-shot diagnostic dump: log every AVCaptureDevice.Format
+        // this camera enumerates BEFORE the ladder runs. Goal: see
+        // the ground truth (dimensions, pixel format four-CC, fps
+        // ranges, supportedColorSpaces, HDR + multicam flags) so we
+        // can fix the matcher against real data. Read in Xcode
+        // console; filter: subsystem com.playercut.app, category
+        // FormatDump.
+        DeviceCapabilities.dumpFormats(
+            for: videoDevice,
+            label: debugInfo.selectedCamera)
+
         // Capture-by-value the references the closure needs. The session
         // and the output objects are reference types whose identity is
         // stable; capturing them here avoids touching @MainActor `self.*`

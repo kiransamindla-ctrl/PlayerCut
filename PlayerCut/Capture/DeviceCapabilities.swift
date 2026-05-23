@@ -349,6 +349,81 @@ enum DeviceCapabilities {
         return (nil, recipe)
     }
 
+    // MARK: - Diagnostic format dump
+
+    /// One-time dump of every AVCaptureDevice.Format the device
+    /// enumerates. Called once at configure() before the ladder runs.
+    /// Goal: ground-truth what's actually on this camera so the
+    /// matcher can be fixed against real data, not assumptions.
+    ///
+    /// Each format gets ONE log line under category "FormatDump" with
+    /// the fields the user asked for in the diagnostic spec:
+    ///   - dimensions (WxH from CMVideoFormatDescriptionGetDimensions)
+    ///   - media subtype four-CC (this is the PIXEL FORMAT, e.g.
+    ///     '420v' / '420f', NOT the encode codec — important: the
+    ///     current matcher checks this against 'hvc1' which is wrong;
+    ///     HEVC vs H.264 is decided at encode time, not by the
+    ///     capture format's pixel layout)
+    ///   - videoSupportedFrameRateRanges (min...max for each range)
+    ///   - supportedColorSpaces (sRGB / P3_D65 / HLG_BT2020 / appleLog)
+    ///   - isVideoHDRSupported
+    ///   - isMultiCamSupported (Apple often hides 4K formats behind
+    ///     this flag — if it's true, the format is a multi-cam format
+    ///     that may not be usable for our single-cam recording)
+    ///   - supportedMaxPhotoDimensions count (photo-capable formats
+    ///     have non-empty arrays; video-only formats are empty)
+    ///
+    /// Read this in Xcode console (filter: subsystem com.playercut.app,
+    /// category FormatDump) or via idevicesyslog | grep FormatDump.
+    static func dumpFormats(for device: AVCaptureDevice,
+                            label: String) {
+        let log = Logger(subsystem: "com.playercut.app",
+                         category: "FormatDump")
+        log.info("─── Format dump for \(label, privacy: .public) (\(device.formats.count) formats) ───")
+        for (i, format) in device.formats.enumerated() {
+            let dims = CMVideoFormatDescriptionGetDimensions(
+                format.formatDescription)
+            let subtype = CMFormatDescriptionGetMediaSubType(
+                format.formatDescription)
+            let fourCC = fourCCString(subtype)
+            let rangesStr = format.videoSupportedFrameRateRanges
+                .map { "\(Int($0.minFrameRate))...\(Int($0.maxFrameRate))" }
+                .joined(separator: ",")
+            let colorSpaces = format.supportedColorSpaces
+                .map(colorSpaceLabel(_:))
+                .joined(separator: "/")
+            let photoDims = format.supportedMaxPhotoDimensions.count
+            log.info("[\(i)] \(dims.width)x\(dims.height) subtype=\(fourCC, privacy: .public) fps=\(rangesStr, privacy: .public) colors=\(colorSpaces, privacy: .public) HDR=\(format.isVideoHDRSupported) multicam=\(format.isMultiCamSupported) photoDims=\(photoDims)")
+        }
+        log.info("─── end format dump ───")
+    }
+
+    /// Converts an OSType (FourCharCode) into its 4-character string
+    /// representation. Returns "????" for non-printable codes.
+    private static func fourCCString(_ code: FourCharCode) -> String {
+        let bytes: [UInt8] = [
+            UInt8((code >> 24) & 0xFF),
+            UInt8((code >> 16) & 0xFF),
+            UInt8((code >> 8)  & 0xFF),
+            UInt8( code        & 0xFF)
+        ]
+        guard bytes.allSatisfy({ $0 >= 0x20 && $0 < 0x7F }) else {
+            return String(format: "0x%08x", code)
+        }
+        return String(bytes: bytes, encoding: .ascii) ?? "????"
+    }
+
+    /// Friendly label for AVCaptureColorSpace raw values.
+    private static func colorSpaceLabel(_ cs: AVCaptureColorSpace) -> String {
+        switch cs {
+        case .sRGB:       return "sRGB"
+        case .P3_D65:     return "P3"
+        case .HLG_BT2020: return "HLG"
+        case .appleLog:   return "AppleLog"
+        @unknown default: return "cs(\(cs.rawValue))"
+        }
+    }
+
     // MARK: - Machine identifier
 
     /// `utsname.machine` value. Public so tests can override the input
