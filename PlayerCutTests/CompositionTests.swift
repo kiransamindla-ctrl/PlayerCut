@@ -455,6 +455,50 @@ final class ComposerFallbackRegressionTests: XCTestCase {
     }
 }
 
+// MARK: - Writer-pipeline scaffolding (stock-quality build SEC 2)
+
+/// Ensures the experimental AVAssetWriter recording path is reachable
+/// and constructible with the spec'd bitrates without crashing. We
+/// can't exercise the writer end-to-end without a real
+/// AVCaptureSession on device, so this checks the wiring shim is
+/// healthy at unit-test scope.
+final class WriterRecordingPipelineScaffoldingTests: XCTestCase {
+
+    func testFlagDefaultsOff() {
+        // The experimental flag MUST default to false so the legacy
+        // production path runs by default. A future PR that flips
+        // this on by accident has to break this test first.
+        UserDefaults.standard.removeObject(forKey: WriterCaptureFlag.defaultsKey)
+        XCTAssertFalse(WriterCaptureFlag.isEnabled,
+                       "WriterCaptureFlag must default to OFF")
+    }
+
+    func testFlagRoundTrip() {
+        UserDefaults.standard.set(true, forKey: WriterCaptureFlag.defaultsKey)
+        XCTAssertTrue(WriterCaptureFlag.isEnabled)
+        UserDefaults.standard.set(false, forKey: WriterCaptureFlag.defaultsKey)
+        XCTAssertFalse(WriterCaptureFlag.isEnabled)
+        UserDefaults.standard.removeObject(forKey: WriterCaptureFlag.defaultsKey)
+    }
+
+    func testPipelineConstructsAt4KAnd1080p() {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("writer-scaffold-\(UUID().uuidString).mp4")
+        // 4K capture → 45 Mbps target
+        let p4k = WriterRecordingPipeline(
+            outputURL: tmp,
+            settings: .init(videoSize: CGSize(width: 3840, height: 2160),
+                            videoBitRate: 45_000_000))
+        XCTAssertEqual(p4k.outputURL, tmp)
+        // 1080p capture → 25 Mbps target
+        let p1080 = WriterRecordingPipeline(
+            outputURL: tmp,
+            settings: .init(videoSize: CGSize(width: 1920, height: 1080),
+                            videoBitRate: 25_000_000))
+        XCTAssertEqual(p1080.outputURL, tmp)
+    }
+}
+
 // MARK: - Codec ladder + grade regression guards (quality build SEC 1+3+4)
 
 /// Ladder rule per Section 1: H.264 is NEVER emitted at 4K. iOS does
