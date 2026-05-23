@@ -29,6 +29,19 @@ final class GameCaptureController: NSObject {
     private let frameTapOutput = AVCaptureVideoDataOutput()
     private let frameTapQueue = DispatchQueue(label: "playercut.frameTap")
 
+    // ── Experimental AVAssetWriter recording path (Section 2) ──
+    // Gated by WriterCaptureFlag.isEnabled (default OFF). When the
+    // flag is ON we use writerVideoOutput + WriterRecordingPipeline
+    // instead of `videoOutput` (AVCaptureMovieFileOutput) for the
+    // recording. The legacy path is left intact and is still the
+    // production default until on-device side-by-side verification.
+    private let writerVideoOutput = AVCaptureVideoDataOutput()
+    private let writerVideoQueue = DispatchQueue(label: "playercut.writer.video")
+    private let writerAudioFanoutQueue = DispatchQueue(label: "playercut.writer.audio.fanout")
+    private let writerVideoDelegate = WriterVideoDelegate()
+    private let writerAudioDelegate = WriterAudioDelegate()
+    private var writerPipeline: WriterRecordingPipeline?
+
     /// THE serial queue. Per Apple's AVCam sample and the AVFoundation
     /// engineer guidance on developer.apple.com/forums/thread/792147:
     /// every touch of AVCaptureSession, its inputs/outputs/connections,
@@ -168,6 +181,13 @@ final class GameCaptureController: NSObject {
         let frameTapQueue = self.frameTapQueue
         let debugInfo = self.debugInfo
         let audioDelegate: AVCaptureAudioDataOutputSampleBufferDelegate = self
+        // Writer path captures (Section 2). Captured here even when
+        // the flag is off so the closure doesn't have to touch self.
+        let writerVideoOutput = self.writerVideoOutput
+        let writerVideoQueue = self.writerVideoQueue
+        let writerAudioFanoutQueue = self.writerAudioFanoutQueue
+        let writerVideoDelegate = self.writerVideoDelegate
+        let writerAudioDelegate = self.writerAudioDelegate
 
         // ── All session work runs sequentially on the serial queue ──
         sessionQueue.async { [weak self] in
@@ -210,31 +230,74 @@ final class GameCaptureController: NSObject {
             }
 
             if setupFailure == nil {
-                // Movie file output. We deliberately do NOT call
-                // setOutputSettings here — that API throws an
-                // uncatchable ObjC NSException ("avc1 is unsupported")
-                // when the connection's available-codec list isn't yet
-                // settled, which terminates this thread and prevents
-                // session.startRunning() from ever being reached.
-                // AVCaptureMovieFileOutput's default codec is HEVC
-                // where supported (iOS 14+), H.264 otherwise — which
-                // matches the recipe's preference on every device we
-                // target (iPhone 13+, A15+).
-                if session.canAddOutput(videoOutput) {
-                    session.addOutput(videoOutput)
-                    if let conn = videoOutput.connection(with: .video) {
-                        conn.preferredVideoStabilizationMode = .standard
+                // ── Recording output: branch on WriterCaptureFlag ──
+                // When the flag is ON the experimental
+                // AVCaptureVideoDataOutput + WriterRecordingPipeline
+                // path takes over; AVCaptureMovieFileOutput is
+                // intentionally NOT added (it would duplicate the
+                // recording and starve the writer of bandwidth).
+                let writerPath = WriterCaptureFlag.isEnabled
+                if writerPath {
+                    // Writer pipeline owns the recording. We need a
+                    // full-res sample-buffer feed; the BGRA32
+                    // pixel format gives the writer the cleanest
+                    // signal and is what AVAssetWriter's HEVC encoder
+                    // expects.
+                    writerVideoOutput.alwaysDiscardsLateVideoFrames = false
+                    writerVideoOutput.videoSettings = [
+                        kCVPixelBufferPixelFormatTypeKey as String:
+                            Int(kCVPixelFormatType_32BGRA)
+                    ]
+                    writerVideoOutput.setSampleBufferDelegate(
+                        writerVideoDelegate,
+                        queue: writerVideoQueue)
+                    if session.canAddOutput(writerVideoOutput) {
+                        session.addOutput(writerVideoOutput)
+                        if let conn = writerVideoOutput
+                            .connection(with: .video) {
+                            // Stabilization: walked by stabilizationMode()
+                            // (Section 3) when applyRecipe re-pins.
+                            conn.preferredVideoStabilizationMode = .standard
+                        }
+                    }
+                } else {
+                    // Legacy AVCaptureMovieFileOutput. Default codec
+                    // (HEVC on iOS 14+) is intentional — see the
+                    // setOutputSettings NSException commit body for
+                    // why we don't pin it explicitly.
+                    if session.canAddOutput(videoOutput) {
+                        session.addOutput(videoOutput)
+                        if let conn = videoOutput.connection(with: .video) {
+                            conn.preferredVideoStabilizationMode = .standard
+                        }
                     }
                 }
 
-                // Audio loudness tap
-                audioDataOutput.setSampleBufferDelegate(audioDelegate,
-                                                       queue: audioQueue)
+                // Audio tap. Always added, but the delegate target
+                // depends on whether the writer path is active:
+                //   flag OFF → loudness delegate (`audioDelegate`,
+                //              which is GameCaptureController itself)
+                //   flag ON  → writer fan-out (writerAudioDelegate),
+                //              which forwards into the writer AND
+                //              into the loudness delegate so the
+                //              sidecar still gets samples.
+                if writerPath {
+                    writerAudioDelegate.loudnessDelegate = audioDelegate
+                    audioDataOutput.setSampleBufferDelegate(
+                        writerAudioDelegate,
+                        queue: writerAudioFanoutQueue)
+                } else {
+                    audioDataOutput.setSampleBufferDelegate(
+                        audioDelegate,
+                        queue: audioQueue)
+                }
                 if session.canAddOutput(audioDataOutput) {
                     session.addOutput(audioDataOutput)
                 }
 
-                // Diagnostic frame tap (verifies frames flow).
+                // Diagnostic frame tap (verifies frames flow). Kept
+                // on both paths so the on-screen overlay's FRAME row
+                // updates regardless.
                 frameTapOutput.alwaysDiscardsLateVideoFrames = true
                 frameTapOutput.setSampleBufferDelegate(frameTapDelegate,
                                                       queue: frameTapQueue)
@@ -921,13 +984,48 @@ final class GameCaptureController: NSObject {
         let session = self._session
         let videoOutput = self.videoOutput
         let recordingDelegate: AVCaptureFileOutputRecordingDelegate = self
+        let writerPath = WriterCaptureFlag.isEnabled
+        // Writer-path bitrate scales with capture resolution. The
+        // values come from the spec (Section 2): ~45 Mbps for 4K,
+        // ~25 Mbps for 1080p HEVC — matches stock-Camera rates.
+        let writerBitRate: Int = {
+            switch currentRecipe?.resolution {
+            case .uhd4k:   return 45_000_000
+            default:       return 25_000_000
+            }
+        }()
+        let writerVideoSize: CGSize = {
+            guard let device = videoDevice else {
+                return CGSize(width: 1920, height: 1080)
+            }
+            let d = CMVideoFormatDescriptionGetDimensions(
+                device.activeFormat.formatDescription)
+            return CGSize(width: CGFloat(d.width),
+                          height: CGFloat(d.height))
+        }()
+        if writerPath {
+            let pipeline = WriterRecordingPipeline(
+                outputURL: videoURL,
+                settings: .init(videoSize: writerVideoSize,
+                                videoBitRate: writerBitRate))
+            self.writerPipeline = pipeline
+            self.writerVideoDelegate.pipeline = pipeline
+            self.writerAudioDelegate.pipeline = pipeline
+            self.log.info("WRITER path: target \(Int(writerVideoSize.width))×\(Int(writerVideoSize.height)) HEVC @ \(writerBitRate / 1_000_000) Mbps")
+        }
         sessionQueue.async {
             if !session.isRunning {
                 Logger(subsystem: "com.playercut.app", category: "Capture")
                     .warning("startRecording: session not running, starting now")
                 session.startRunning()
             }
-            videoOutput.startRecording(to: videoURL, recordingDelegate: recordingDelegate)
+            if !writerPath {
+                videoOutput.startRecording(to: videoURL,
+                                           recordingDelegate: recordingDelegate)
+            }
+            // Writer path needs no start call here — the pipeline
+            // is now wired as the delegate target on the writer's
+            // video + audio outputs and starts on first sample.
         }
 
         let game = GameSession(id: id,
@@ -955,18 +1053,42 @@ final class GameCaptureController: NSObject {
         guard var game = currentSession else {
             throw PipelineError.captureFailed("No active session")
         }
-        // Stop the file output + (eventually) the session on the
-        // sessionQueue. Don't bother awaiting the stop — the delegate
-        // signals completion via fileOutput(:didFinishRecordingTo:).
         let session = self._session
         let videoOutput = self.videoOutput
-        sessionQueue.async {
-            videoOutput.stopRecording()
-            if session.isRunning {
-                session.stopRunning()
+        // Writer path: tell the writer pipeline to finalize FIRST
+        // (so we don't stop the session out from under in-flight
+        // sample buffers), then stop the session.
+        // Legacy path: AVCaptureMovieFileOutput's stopRecording is
+        // async via the file-output delegate; we just stop it and
+        // let the brief Task.sleep below cover finalization.
+        if let pipeline = writerPipeline {
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                pipeline.finish { result in
+                    switch result {
+                    case .success(let url):
+                        Logger(subsystem: "com.playercut.app", category: "Capture")
+                            .info("writer finished: \(url.lastPathComponent, privacy: .public)")
+                    case .failure(let err):
+                        Logger(subsystem: "com.playercut.app", category: "Capture")
+                            .error("writer finish failed: \(err.localizedDescription)")
+                    }
+                    cont.resume()
+                }
+            }
+            sessionQueue.async {
+                if session.isRunning { session.stopRunning() }
+            }
+            writerPipeline = nil
+        } else {
+            sessionQueue.async {
+                videoOutput.stopRecording()
+                if session.isRunning {
+                    session.stopRunning()
+                }
             }
         }
-        // Wait briefly for finalization.
+        // Wait briefly for finalization (legacy path; writer already
+        // awaited above).
         try await Task.sleep(nanoseconds: 300_000_000)
 
         // Write loudness sidecar
