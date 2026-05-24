@@ -204,6 +204,44 @@ final class SampleVideoPipelineTests: XCTestCase {
                            assembled.totalDuration.seconds, accuracy: 0.05,
                            "Inserted audio tracks must match the video timeline")
         }
+
+        // 8. Per-stage proof that the right things actually happened on the
+        //    sample-video reel — not just that a file came out.
+
+        // Stage 8 — speed ramps: an energetic, high-energy plan must carry
+        // at least one slow-mo segment (factor < 1).
+        let allClips = [editPlan.coldOpen].compactMap { $0 } + editPlan.body
+        let hasRamp = allClips.contains { clip in
+            clip.speedCurve.segments.contains { $0.factor < 0.99 }
+        }
+        XCTAssertTrue(hasRamp,
+                      "Stage 8: an energetic high-energy plan must include a slow-mo ramp")
+
+        // Stage 9 — transitions: at least one instruction blends across the
+        // 2-track A/B boundary.
+        let transitions = assembled.instructions.filter { $0.transitionKind != nil }
+        XCTAssertFalse(transitions.isEmpty,
+                       "Stage 9: reel must have ≥1 A/B transition")
+        XCTAssertEqual(videoTracks.count, 2,
+                       "Stage 9: A/B two-track structure must be present to blend")
+
+        // Stage 10 — audio mix: music + game-audio input parameters wired
+        // (the duck/fade envelopes ride on these; no-op-safe at 0 loudness).
+        XCTAssertFalse(assembled.audioMix.inputParameters.isEmpty,
+                       "Stage 10: audio mix must carry input parameters (music bed + ducking)")
+
+        // Stage 11 — export codec at 1080×1920. On the simulator HEVC may
+        // fall back to H.264; accept either and log which.
+        if let track = vtracks.first {
+            let formats = try await track.load(.formatDescriptions)
+            if let fmt = formats.first {
+                let sub = CMFormatDescriptionGetMediaSubType(fmt)
+                let known: Set<FourCharCode> = [kCMVideoCodecType_HEVC,
+                                                kCMVideoCodecType_H264]
+                XCTAssertTrue(known.contains(sub),
+                              "Stage 11: output should be HEVC or H.264 (got \(sub))")
+            }
+        }
     }
 
     // MARK: - Stage 1 ingest + optical flow on the simulator
