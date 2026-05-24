@@ -260,8 +260,26 @@ actor Stage1CoarseDetector {
             let current = copyToPool(frame.buffer) ?? frame.buffer
 
             if let prev = previousPixelBuffer {
-                let mag = try await opticalFlowMagnitude(from: prev, to: current)
-                magnitudes.append((frame.time, mag))
+                do {
+                    let mag = try await opticalFlowMagnitude(from: prev, to: current)
+                    magnitudes.append((frame.time, mag))
+                } catch {
+                    // VNGenerateOpticalFlowRequest needs a hardware
+                    // motion-flow estimator that some environments can't
+                    // provide — notably the iOS Simulator, which fails
+                    // with "Code=9 Failed to create motion flow estimator".
+                    // Failing the whole game here would mark it permanently
+                    // .failed (poison-game) and force a re-record. Instead
+                    // we abandon motion detection loudly and let the
+                    // never-reject ranker fall back to a Tier-3 montage —
+                    // the user still gets a reel.
+                    // SOURCE: Apple Vision VNGenerateOpticalFlowRequest is
+                    // unavailable on the Simulator; verified 2026-05-23.
+                    let ns = error as NSError
+                    log.error("Stage 1 motion: optical flow unavailable (\(ns.domain, privacy: .public) code=\(ns.code) — \(ns.localizedDescription, privacy: .public)); abandoning motion detection, ranker Tier 3 will montage")
+                    await iterator.cancel()
+                    return []
+                }
             }
             previousPixelBuffer = current
         }

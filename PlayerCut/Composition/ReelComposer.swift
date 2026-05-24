@@ -59,6 +59,14 @@ final class ReelComposer {
     var enableTitleCards: Bool = true
     var enableLowerThird: Bool = true
     var enableClosingCard: Bool = true
+    /// Test/seam knob. Production leaves this true so finished reels are
+    /// copied into Photos. The simulator integration test sets it false
+    /// so compose() never blocks on the `.addOnly` authorization prompt
+    /// in a headless XCTest host (the request continuation would never
+    /// resume and the test would hang). When false, compose() returns a
+    /// Result with savedToPhotos == false and skips PhotosLibraryService
+    /// entirely.
+    var savesToPhotos: Bool = true
     /// Cross-clip blend duration. Compositor clamps to ≤ 25 % of the
     /// shorter of the two clip's rendered duration.
     var transitionDuration: Double = 0.45
@@ -410,11 +418,15 @@ final class ReelComposer {
         }
 
         // ─── Stage: savePhotos ──────────────────────────────────────
-        let outcome = await PhotosLibraryService.saveReel(fileURL: outputURL)
-
-        // Affirm: we did not silently fall back. Regression-guard tests
-        // assert this stays false through the happy-path fixture.
+        // Affirm first: we did not silently fall back. Regression-guard
+        // tests assert this stays false through the happy-path fixture.
         await DiagnosticsStore.shared.composerUsedFallback(false)
+
+        guard savesToPhotos else {
+            log.info("Photos save skipped (savesToPhotos == false) — local reel is canonical")
+            return Result(localURL: outputURL, savedToPhotos: false, assetId: nil)
+        }
+        let outcome = await PhotosLibraryService.saveReel(fileURL: outputURL)
 
         switch outcome {
         case .savedToAlbumAndRecents(let id):
