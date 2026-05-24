@@ -54,11 +54,35 @@ final class ReelComposer {
         let assetId: String?
     }
 
+    /// Snapshot of the pieces handed to the exporter, captured by
+    /// compose() immediately before export. Lets white-box regression
+    /// tests assert the -11841-avoidance invariants — ≤2 video tracks
+    /// (A/B), instructions that tile [.zero, totalDuration] contiguously,
+    /// and an audio timeline that matches the video timeline — without
+    /// re-deriving them or paying for a second export. nil until a
+    /// compose() runs.
+    struct AssembledComposition {
+        let composition: AVMutableComposition
+        let videoComposition: AVMutableVideoComposition
+        let audioMix: AVMutableAudioMix
+        let totalDuration: CMTime
+        let instructions: [MetalPetalInstruction]
+    }
+    private(set) var lastAssembled: AssembledComposition?
+
     // Knobs surfaced to the orchestrator so device-class gating can
     // turn off heavy stages on weaker hardware.
     var enableTitleCards: Bool = true
     var enableLowerThird: Bool = true
     var enableClosingCard: Bool = true
+    /// Test/seam knob. Production leaves this true so finished reels are
+    /// copied into Photos. The simulator integration test sets it false
+    /// so compose() never blocks on the `.addOnly` authorization prompt
+    /// in a headless XCTest host (the request continuation would never
+    /// resume and the test would hang). When false, compose() returns a
+    /// Result with savedToPhotos == false and skips PhotosLibraryService
+    /// entirely.
+    var savesToPhotos: Bool = true
     /// Cross-clip blend duration. Compositor clamps to ≤ 25 % of the
     /// shorter of the two clip's rendered duration.
     var transitionDuration: Double = 0.45
@@ -325,6 +349,15 @@ final class ReelComposer {
             mix.inputParameters.append(params)
         }
 
+        // Snapshot the assembled pieces for white-box regression tests
+        // (Section 8). References only — no copy, no behavior change.
+        self.lastAssembled = AssembledComposition(
+            composition: composition,
+            videoComposition: videoComposition,
+            audioMix: mix,
+            totalDuration: totalDuration,
+            instructions: instructions)
+
         // ─── Stage: exportSetup ─────────────────────────────────────
         // Prefer AVAssetExportPresetHEVC1920x1080 — it targets ~14 Mbps
         // HEVC at 1080p, materially crisper than AVAssetExportPreset
@@ -410,11 +443,15 @@ final class ReelComposer {
         }
 
         // ─── Stage: savePhotos ──────────────────────────────────────
-        let outcome = await PhotosLibraryService.saveReel(fileURL: outputURL)
-
-        // Affirm: we did not silently fall back. Regression-guard tests
-        // assert this stays false through the happy-path fixture.
+        // Affirm first: we did not silently fall back. Regression-guard
+        // tests assert this stays false through the happy-path fixture.
         await DiagnosticsStore.shared.composerUsedFallback(false)
+
+        guard savesToPhotos else {
+            log.info("Photos save skipped (savesToPhotos == false) — local reel is canonical")
+            return Result(localURL: outputURL, savedToPhotos: false, assetId: nil)
+        }
+        let outcome = await PhotosLibraryService.saveReel(fileURL: outputURL)
 
         switch outcome {
         case .savedToAlbumAndRecents(let id):
