@@ -156,6 +156,54 @@ final class SampleVideoPipelineTests: XCTestCase {
         let snap = await DiagnosticsStore.shared.currentSnapshot()
         XCTAssertNotEqual(snap.counters[CounterKey.composerUsedFallback.rawValue], 1,
                           "Composer must not report a primitive fallback")
+
+        // 7. White-box -11841-avoidance invariants (Section 8), asserted
+        //    against the exact composition that just exported cleanly.
+        //
+        //    NOTE: for a MULTI-instruction custom video composition the
+        //    correct invariant is contiguous, non-overlapping tiling from
+        //    .zero to totalDuration — NOT each instruction spanning the
+        //    whole composition (that rule applies to single- or
+        //    layer-instruction setups). Tiling with a gap or overlap is
+        //    what actually triggers -11841 "Operation Stopped" here.
+        let assembled = try XCTUnwrap(composer.lastAssembled,
+                                      "compose() should have snapshotted the assembly")
+
+        // ≤ 2 video tracks (A/B). >15-16 tracks fails export.
+        let videoTracks = assembled.composition.tracks(withMediaType: .video)
+        XCTAssertLessThanOrEqual(videoTracks.count, 2,
+                                 "Composition must cap video tracks at 2 (A/B)")
+
+        let instr = assembled.videoComposition.instructions
+        XCTAssertFalse(instr.isEmpty, "Composition must have at least one instruction")
+        XCTAssertEqual(instr.first!.timeRange.start.seconds, 0, accuracy: 0.001,
+                       "First instruction must start at .zero")
+        for i in 1..<instr.count {
+            XCTAssertEqual(instr[i].timeRange.start.seconds,
+                           instr[i - 1].timeRange.end.seconds, accuracy: 0.002,
+                           "Instructions must tile contiguously (no gaps/overlaps)")
+        }
+        XCTAssertEqual(instr.last!.timeRange.end.seconds,
+                       assembled.totalDuration.seconds, accuracy: 0.05,
+                       "Instructions must cover the full composition duration")
+        for ins in instr {
+            XCTAssertGreaterThan(ins.timeRange.duration.seconds, 0,
+                                 "No instruction may have non-positive duration")
+            XCTAssertLessThanOrEqual(ins.timeRange.end.seconds,
+                                     assembled.totalDuration.seconds + 0.05,
+                                     "No instruction may extend past the composition")
+        }
+
+        // Audio timeline == video timeline. Any inserted audio track (the
+        // music bed here; the game-audio track is empty for this
+        // video-only source) must match the composition duration so the
+        // A/V-mismatch -11841 can't fire.
+        for at in assembled.composition.tracks(withMediaType: .audio)
+        where at.timeRange.duration.seconds > 0 {
+            XCTAssertEqual(at.timeRange.duration.seconds,
+                           assembled.totalDuration.seconds, accuracy: 0.05,
+                           "Inserted audio tracks must match the video timeline")
+        }
     }
 
     // MARK: - Stage 1 ingest + optical flow on the simulator
