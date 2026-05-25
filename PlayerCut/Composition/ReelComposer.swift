@@ -693,15 +693,29 @@ final class ReelComposer {
     }
 
     private func rasterize(layer: CALayer, size: CGSize) -> MTIImage? {
-        // CALayer's render uses top-left origin; AVFoundation's render
-        // pipeline expects bottom-left for video. We flip the rendered
-        // image vertically via Core Graphics before handing it to MTI.
+        // The card layers position their sublayers in a BOTTOM-LEFT
+        // coordinate space (authored for the old CoreAnimationTool path,
+        // which renders bottom-left). UIGraphicsImageRenderer draws
+        // top-left, and MTIImage(cgImage:) loads the bitmap upright (no
+        // implicit flip — orientation defaults to .up). The previous
+        // `scaleBy(1,-1)` context flip got the sublayer PLACEMENT right
+        // but mirrored every rendered glyph, so the title/closing text
+        // exported UPSIDE-DOWN.
+        //
+        // isGeometryFlipped reconciles the bottom-left sublayer placement
+        // WITHOUT mirroring the rendered content — text stays upright and
+        // lands in the same position the old flip produced.
+        // Render the card layer straight into the (top-left) UIKit
+        // context. MTIImage(cgImage:) loads the bitmap upright
+        // (orientation defaults to .up) and the MetalPetal compositor
+        // draws it in the same orientation as the source video frames, so
+        // no flip is needed. The old `scaleBy(1,-1)` context flip mirrored
+        // every glyph and exported the title/closing text UPSIDE-DOWN
+        // (device bug). Verified upright via TitleFrameTests
+        // (Documents/title-frame.png on the sim). // SOURCE: verified by
+        // frame extraction on iPhone 17 sim 2026-05-25.
         let renderer = UIGraphicsImageRenderer(size: size)
         let image = renderer.image { ctx in
-            // Flip vertically so the rasterized layer lines up with the
-            // video frame's bottom-left coordinate system.
-            ctx.cgContext.translateBy(x: 0, y: size.height)
-            ctx.cgContext.scaleBy(x: 1, y: -1)
             layer.render(in: ctx.cgContext)
         }
         guard let cg = image.cgImage else { return nil }

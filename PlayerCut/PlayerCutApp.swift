@@ -45,8 +45,30 @@ final class AppCoordinator: ObservableObject {
         let center = UNUserNotificationCenter.current()
         _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
 
+        #if DEBUG
+        // UI-test seam: seed a player so the populated home (Record game →
+        // pre-record sheet) is reachable on the simulator, where the
+        // camera-based enrollment can't run. Gated on a launch argument,
+        // mirroring the onboarding-skip args the UI tests already pass.
+        if ProcessInfo.processInfo.arguments.contains("-playercut.uitest_seed_player") {
+            await seedUITestPlayerIfNeeded()
+        }
+        #endif
+
         await refresh()
     }
+
+    #if DEBUG
+    private func seedUITestPlayerIfNeeded() async {
+        guard await store.allPlayers().isEmpty else { return }
+        let player = PlayerEnrollment(
+            id: UUID(), name: "Test Kid", jerseyNumber: "10",
+            jerseyColorHSV: HSVHistogram(bins: [Float](repeating: 0, count: 256)),
+            faceEmbedding: [Float](repeating: 0, count: 128),
+            sport: .soccer, createdAt: Date())
+        try? await store.upsert(player)
+    }
+    #endif
 
     func refresh() async {
         games = await store.allGames()
@@ -66,6 +88,8 @@ final class AppCoordinator: ObservableObject {
 struct RootView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @State private var presentingEnrollment = false
+    @State private var presentingPreRecord = false
+    @State private var preRecordChoice: PreRecordChoice?
     @State private var presentingCapture = false
     @State private var presentingSettings = false
     @State private var presentingCompilation = false
@@ -133,9 +157,30 @@ struct RootView: View {
                         .environmentObject(coordinator)
                 }
             }
+            .sheet(isPresented: $presentingPreRecord, onDismiss: {
+                // Open the camera only when the parent tapped Continue
+                // (which sets preRecordChoice); Cancel leaves it nil.
+                if preRecordChoice != nil { presentingCapture = true }
+            }) {
+                if let player = coordinator.players.first {
+                    PreRecordSheet(
+                        player: player,
+                        onContinue: { choice in
+                            preRecordChoice = choice
+                            presentingPreRecord = false
+                        },
+                        onCancel: {
+                            preRecordChoice = nil
+                            presentingPreRecord = false
+                        })
+                }
+            }
             .fullScreenCover(isPresented: $presentingCapture) {
                 if let player = coordinator.players.first {
-                    CaptureView(player: player)
+                    CaptureView(
+                        player: player,
+                        reelLength: preRecordChoice?.length ?? player.reelLengthPreference,
+                        musicVibe: preRecordChoice?.vibe ?? player.musicVibe)
                         .environmentObject(coordinator)
                 }
             }
@@ -355,7 +400,8 @@ struct RootView: View {
                          systemImage: "record.circle.fill",
                          tint: Theme.primary,
                          height: 64) {
-                presentingCapture = true
+                preRecordChoice = nil
+                presentingPreRecord = true
             }
             .accessibilityIdentifier("record-game")
             PCOutlinePillButton(title: "Compilation",

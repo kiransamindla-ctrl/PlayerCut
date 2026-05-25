@@ -144,89 +144,41 @@ struct IdentityStepView: View {
 
 struct JerseyColorStepView: View {
     @ObservedObject var vm: EnrollmentViewModel
-    @State private var showingCamera = false
-    @State private var showingPicker = false
+    // Swatch-only: the player photo is taken ONCE, in the selfie step.
+    // Jersey color is a colour pick so enrollment never asks for a second
+    // photo. captureJerseyColor(fromSwatch:) renders the swatch into a
+    // small image and extracts the same HSV histogram the matcher expects,
+    // so the identification path is unchanged.
     @State private var pickedColor: Color = .blue
 
     var body: some View {
         VStack(spacing: 24) {
-            Text("Take a photo of the jersey, or pick the closest color.")
+            Text("Pick your player's jersey color. We use it — along with their number and face — to find them on the field.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
 
-            if let image = vm.sampledJerseyImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 220)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.green, lineWidth: 3)
-                    )
-                    .padding(.horizontal)
-            } else {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.secondary.opacity(0.15))
-                    .frame(height: 220)
-                    .overlay(
-                        VStack {
-                            Image(systemName: "tshirt").font(.system(size: 56))
-                            Text("No jersey sampled yet")
-                                .foregroundStyle(.secondary)
-                        }
-                    )
-                    .padding(.horizontal)
-            }
+            RoundedRectangle(cornerRadius: 16)
+                .fill(pickedColor)
+                .frame(height: 180)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                )
+                .padding(.horizontal)
 
-            HStack(spacing: 12) {
-                Button {
-                    showingCamera = true
-                } label: {
-                    Label("Take photo", systemImage: "camera")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                Button {
-                    showingPicker = true
-                } label: {
-                    Label("Pick color", systemImage: "paintpalette")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-            }
-            .padding(.horizontal)
+            ColorPicker("Jersey color", selection: $pickedColor,
+                        supportsOpacity: false)
+                .font(.headline)
+                .padding(.horizontal)
 
             Spacer()
         }
         .padding(.top)
-        .sheet(isPresented: $showingCamera) {
-            ImageCaptureView(sourceType: .camera) { image in
-                vm.captureJerseyColor(from: image)
-            }
-        }
-        .sheet(isPresented: $showingPicker) {
-            VStack(spacing: 24) {
-                Text("Pick the closest color")
-                    .font(.headline)
-                ColorPicker("Jersey color",
-                            selection: $pickedColor,
-                            supportsOpacity: false)
-                    .padding()
-                Button("Use this color") {
-                    vm.captureJerseyColor(fromSwatch: UIColor(pickedColor))
-                    showingPicker = false
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                Spacer()
-            }
-            .padding()
-            .presentationDetents([.medium])
+        // Seed the default so the step can advance, then track edits.
+        .onAppear { vm.captureJerseyColor(fromSwatch: UIColor(pickedColor)) }
+        .onChange(of: pickedColor) { _, newColor in
+            vm.captureJerseyColor(fromSwatch: UIColor(newColor))
         }
     }
 }
