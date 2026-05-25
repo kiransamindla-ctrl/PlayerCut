@@ -229,8 +229,11 @@ actor PipelineOrchestrator {
                     let aspect = game.outputAspectOverride ?? player.outputAspect
                     let renderSize = aspect.renderSize(forLength: length)
                     let output = OutputSpec(size: renderSize, fps: 30)
-                    let style = EditStyle.defaultFor(
-                        musicVibe: player.musicVibe)
+                    // Per-game vibe (chosen on the pre-record sheet) beats
+                    // the player's stored default; drives BOTH the edit
+                    // style and the music pick.
+                    let vibe = game.musicVibeOverride ?? player.musicVibe
+                    let style = EditStyle.defaultFor(musicVibe: vibe)
                     let perfProfile = await DeviceClass.shared.editProfile()
                     let planBuildStart = Date()
                     let builder = EditPlanBuilder(
@@ -247,7 +250,7 @@ actor PipelineOrchestrator {
                     let pickedTrack: MusicLibrary.Track? = await MainActor.run {
                         if musicURL != nil { return nil as MusicLibrary.Track? }
                         return MusicLibrary.shared.pick(
-                            vibe: player.musicVibe,
+                            vibe: vibe,
                             playerId: player.id,
                             length: length)
                     }

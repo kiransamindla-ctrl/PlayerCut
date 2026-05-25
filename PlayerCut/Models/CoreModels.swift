@@ -280,6 +280,9 @@ struct GameSession: Codable, Identifiable {
     var sceneType: SceneType = .outdoor
     /// nil → use the player's `outputAspect`. Per-game override.
     var outputAspectOverride: OutputAspect?
+    /// nil → use the player's `musicVibe`. Per-game override chosen on the
+    /// pre-record sheet; drives both the edit style and MusicLibrary.pick.
+    var musicVibeOverride: MusicVibe?
     /// Which ranker tier produced this game's reel. nil until the
     /// pipeline reaches the ranker.
     var rankerTierUsed: RankerTier?
@@ -308,6 +311,7 @@ struct GameSession: Codable, Identifiable {
          reelLengthOverride: ReelLength? = nil,
          sceneType: SceneType = .outdoor,
          outputAspectOverride: OutputAspect? = nil,
+         musicVibeOverride: MusicVibe? = nil,
          rankerTierUsed: RankerTier? = nil,
          captureRecipe: CaptureRecipe? = nil) {
         self.id = id
@@ -328,6 +332,7 @@ struct GameSession: Codable, Identifiable {
         self.reelLengthOverride = reelLengthOverride
         self.sceneType = sceneType
         self.outputAspectOverride = outputAspectOverride
+        self.musicVibeOverride = musicVibeOverride
         self.rankerTierUsed = rankerTierUsed
         self.captureRecipe = captureRecipe
     }
@@ -345,7 +350,7 @@ struct GameSession: Codable, Identifiable {
         case savedToPhotos, exportedReelAssetId
         case localReelFallbackURL
         case status, triggerSource, reelLengthOverride
-        case sceneType, outputAspectOverride, rankerTierUsed
+        case sceneType, outputAspectOverride, musicVibeOverride, rankerTierUsed
         case captureRecipe
     }
 
@@ -385,6 +390,8 @@ struct GameSession: Codable, Identifiable {
         sceneType = try c.decodeIfPresent(SceneType.self, forKey: .sceneType) ?? .outdoor
         outputAspectOverride = try c.decodeIfPresent(OutputAspect.self,
                                                      forKey: .outputAspectOverride)
+        musicVibeOverride = try c.decodeIfPresent(MusicVibe.self,
+                                                  forKey: .musicVibeOverride)
         rankerTierUsed = try c.decodeIfPresent(RankerTier.self,
                                                forKey: .rankerTierUsed)
         captureRecipe = try c.decodeIfPresent(CaptureRecipe.self,
@@ -417,6 +424,7 @@ struct GameSession: Codable, Identifiable {
         try c.encodeIfPresent(reelLengthOverride, forKey: .reelLengthOverride)
         try c.encode(sceneType, forKey: .sceneType)
         try c.encodeIfPresent(outputAspectOverride, forKey: .outputAspectOverride)
+        try c.encodeIfPresent(musicVibeOverride, forKey: .musicVibeOverride)
         try c.encodeIfPresent(rankerTierUsed, forKey: .rankerTierUsed)
         try c.encodeIfPresent(captureRecipe, forKey: .captureRecipe)
     }
