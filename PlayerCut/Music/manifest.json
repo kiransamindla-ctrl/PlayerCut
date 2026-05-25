@@ -4,144 +4,144 @@
       "id": "energetic_1",
       "file": "energetic_1.m4a",
       "vibe": "Energetic",
-      "bpm": 140,
-      "duration": 75.0
+      "bpm": 138,
+      "duration": 111.5
     },
     {
       "id": "energetic_2",
       "file": "energetic_2.m4a",
       "vibe": "Energetic",
-      "bpm": 128,
-      "duration": 75.0
+      "bpm": 142,
+      "duration": 117.5
     },
     {
       "id": "energetic_3",
       "file": "energetic_3.m4a",
       "vibe": "Energetic",
-      "bpm": 150,
-      "duration": 75.0
+      "bpm": 140,
+      "duration": 134.6
     },
     {
       "id": "energetic_4",
       "file": "energetic_4.m4a",
       "vibe": "Energetic",
-      "bpm": 132,
-      "duration": 75.0
+      "bpm": 125,
+      "duration": 75.4
     },
     {
       "id": "energetic_5",
       "file": "energetic_5.m4a",
       "vibe": "Energetic",
-      "bpm": 124,
-      "duration": 75.0
-    },
-    {
-      "id": "energetic_6",
-      "file": "energetic_6.m4a",
-      "vibe": "Energetic",
-      "bpm": 145,
-      "duration": 75.0
+      "bpm": 131,
+      "duration": 178.5
     },
     {
       "id": "cinematic_1",
       "file": "cinematic_1.m4a",
       "vibe": "Cinematic",
-      "bpm": 85,
-      "duration": 75.0
+      "bpm": 110,
+      "duration": 132.0
     },
     {
       "id": "cinematic_2",
       "file": "cinematic_2.m4a",
       "vibe": "Cinematic",
-      "bpm": 95,
-      "duration": 75.0
+      "bpm": 121,
+      "duration": 70.6
     },
     {
       "id": "cinematic_3",
       "file": "cinematic_3.m4a",
       "vibe": "Cinematic",
-      "bpm": 78,
-      "duration": 75.0
+      "bpm": 125,
+      "duration": 304.0
     },
     {
       "id": "cinematic_4",
       "file": "cinematic_4.m4a",
       "vibe": "Cinematic",
-      "bpm": 90,
-      "duration": 75.0
+      "bpm": 82,
+      "duration": 110.2
     },
     {
       "id": "cinematic_5",
       "file": "cinematic_5.m4a",
       "vibe": "Cinematic",
-      "bpm": 100,
-      "duration": 75.0
+      "bpm": 80,
+      "duration": 72.5
     },
     {
       "id": "playful_1",
       "file": "playful_1.m4a",
       "vibe": "Playful",
-      "bpm": 120,
-      "duration": 75.0
+      "bpm": 119,
+      "duration": 122.0
     },
     {
       "id": "playful_2",
       "file": "playful_2.m4a",
       "vibe": "Playful",
-      "bpm": 116,
-      "duration": 75.0
+      "bpm": 119,
+      "duration": 151.0
     },
     {
       "id": "playful_3",
       "file": "playful_3.m4a",
       "vibe": "Playful",
-      "bpm": 124,
-      "duration": 75.0
+      "bpm": 117,
+      "duration": 118.5
     },
     {
       "id": "playful_4",
       "file": "playful_4.m4a",
       "vibe": "Playful",
-      "bpm": 112,
-      "duration": 75.0
+      "bpm": 117,
+      "duration": 349.9
     },
     {
       "id": "playful_5",
       "file": "playful_5.m4a",
       "vibe": "Playful",
-      "bpm": 128,
-      "duration": 75.0
+      "bpm": 127,
+      "duration": 90.8
     },
     {
       "id": "chill_1",
       "file": "chill_1.m4a",
       "vibe": "Chill",
       "bpm": 90,
-      "duration": 75.0
+      "duration": 130.7
     },
     {
       "id": "chill_2",
       "file": "chill_2.m4a",
       "vibe": "Chill",
-      "bpm": 84,
-      "duration": 75.0
+      "bpm": 78,
+      "duration": 147.0
     },
     {
       "id": "chill_3",
       "file": "chill_3.m4a",
       "vibe": "Chill",
-      "bpm": 96,
-      "duration": 75.0
+      "bpm": 80,
+      "duration": 121.5
     },
     {
       "id": "chill_4",
       "file": "chill_4.m4a",
       "vibe": "Chill",
-      "bpm": 80,
-      "duration": 75.0
+      "bpm": 88,
+      "duration": 102.2
+    },
+    {
+      "id": "chill_5",
+      "file": "chill_5.m4a",
+      "vibe": "Chill",
+      "bpm": 90,
+      "duration": 78.0
     }
   ],
-  "license": "Original works, owned by PlayerCut. Royalty-free, no third-party rights.",
-  "generated": "2026-05-17",
+  "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 royalty-free, commercial use OK, no attribution required. Per-track source filenames in LICENSES.md.",
+  "generated": "2026-05-25",
   "count": 20
 }
