@@ -301,62 +301,116 @@ final class ReelComposer {
             seconds: Date().timeIntervalSince(reframeStart))
 
         // ─── Music bed + audio mix ──────────────────────────────────
+        var musicInserted = false
         if let musicURL = plan.musicURL,
            let musicTrack {
             let music = AVURLAsset(url: musicURL)
             if let track = try? await music.loadTracks(
-                withMediaType: .audio).first {
-                let range = CMTimeRange(start: .zero, duration: totalDuration)
-                try? musicTrack.insertTimeRange(range, of: track, at: .zero)
+                withMediaType: .audio).first,
+               let srcDur = try? await music.load(.duration) {
+                // Only insert as much music as the track actually has — a
+                // 75 s bed under a 5-min reel would otherwise overrun the
+                // source and throw. Loop-free: trim the range to min(total,
+                // music length); the closing fade still lands at `total`.
+                let useDur = CMTimeMinimum(totalDuration, srcDur)
+                let range = CMTimeRange(start: .zero, duration: useDur)
+                do {
+                    try musicTrack.insertTimeRange(range, of: track, at: .zero)
+                    musicInserted = true
+                } catch {
+                    log.warning("Music insert failed (\(error.localizedDescription, privacy: .public)) — reel will be silent")
+                }
             } else {
                 log.warning("Music URL provided but no audio track found — reel will be silent")
             }
         }
 
         let mix = AVMutableAudioMix()
-        if let audioTrack {
+        if let audioTrack, assetAudioTrack != nil {
             let params = AVMutableAudioMixInputParameters(track: audioTrack)
             params.setVolume(gameAudioVolume, at: .zero)
             mix.inputParameters.append(params)
         }
-        if let musicTrack {
+        // Only build the music duck/fade envelope when music was actually
+        // inserted — ramps on an empty track produce an invalid audio mix.
+        if let musicTrack, musicInserted {
             let params = AVMutableAudioMixInputParameters(track: musicTrack)
             params.setVolume(musicBedVolume, at: .zero)
-            // Smoother attack/release on the duck envelope: 350 ms in,
-            // 550 ms out — feels less robotic than the old 250/400 ms.
-            // // SOURCE: typical broadcast duck envelopes (250-500 ms
-            // // attack, 500-900 ms release) sit at this scale.
-            let duckAttack = CMTime(seconds: 0.35, preferredTimescale: 600)
-            let duckRelease = CMTime(seconds: 0.55, preferredTimescale: 600)
-            for range in audioDuckRanges {
-                params.setVolumeRamp(
-                    fromStartVolume: musicBedVolume,
-                    toEndVolume: musicDuckVolume,
-                    timeRange: CMTimeRange(start: range.start,
-                                           duration: duckAttack))
-                params.setVolumeRamp(
-                    fromStartVolume: musicDuckVolume,
-                    toEndVolume: musicBedVolume,
-                    timeRange: CMTimeRange(start: range.end,
-                                           duration: duckRelease))
+            // Duck envelope: 350 ms in, 550 ms out. // SOURCE: typical
+            // broadcast duck envelopes (250-500 ms attack, 500-900 ms
+            // release).
+            //
+            // CRITICAL: AVMutableAudioMixInputParameters throws
+            // "the timeRange of a ramp must not overlap the timeRange of an
+            // existing ramp" if any two ramps overlap — which happens with
+            // densely-spaced clips at a fast tempo (10 clips × 0.6 s). So we
+            // build ALL candidate ramps, then emit them strictly ordered and
+            // clamped to never overlap and never exceed the composition.
+            let duckAttack = 0.35
+            let duckRelease = 0.55
+            let total = totalDuration.seconds
+            var ramps: [(start: Double, end: Double, from: Float, to: Float)] = []
+
+            // Merge duck ranges that are closer than attack+release so their
+            // in/out ramps can't collide; one consolidated dip instead.
+            let sortedDucks = audioDuckRanges
+                .map { (s: $0.start.seconds, e: $0.end.seconds) }
+                .sorted { $0.s < $1.s }
+            var merged: [(s: Double, e: Double)] = []
+            for d in sortedDucks {
+                if var last = merged.last,
+                   d.s <= last.e + duckAttack + duckRelease {
+                    last.e = max(last.e, d.e)
+                    merged[merged.count - 1] = last
+                } else {
+                    merged.append(d)
+                }
             }
-            let fadeStart = CMTime(seconds: max(0, lastBodyOutputEnd),
-                                   preferredTimescale: 600)
-            params.setVolumeRamp(fromStartVolume: musicBedVolume,
-                                 toEndVolume: 0,
-                                 timeRange: CMTimeRange(start: fadeStart,
-                                                        end: totalDuration))
+            for m in merged {
+                ramps.append((m.s, m.s + duckAttack, musicBedVolume, musicDuckVolume))
+                ramps.append((m.e, m.e + duckRelease, musicDuckVolume, musicBedVolume))
+            }
+            // Always-on closing fade to silence.
+            ramps.append((max(0, lastBodyOutputEnd), total, musicBedVolume, 0))
+
+            // Emit ordered, clamped so each ramp starts at/after the previous
+            // ramp's end and stays within [0, total] — guarantees no overlap.
+            var cursor = 0.0
+            for r in ramps.sorted(by: { $0.start < $1.start }) {
+                let s = max(r.start, cursor)
+                let e = min(r.end, total)
+                guard e > s + 0.001 else { continue }
+                params.setVolumeRamp(
+                    fromStartVolume: r.from,
+                    toEndVolume: r.to,
+                    timeRange: CMTimeRange(
+                        start: CMTime(seconds: s, preferredTimescale: 600),
+                        duration: CMTime(seconds: e - s, preferredTimescale: 600)))
+                cursor = e
+            }
             mix.inputParameters.append(params)
         }
 
-        // Snapshot the assembled pieces for white-box regression tests
-        // (Section 8). References only — no copy, no behavior change.
+        // ─── Stage: pre-export validator (Section 1, tempo-proof) ───
+        // Final guarantee before export: instructions tile [.zero, total]
+        // exactly, ≤2 video tracks, every audio track == video length.
+        // Repairs in place rather than failing, so a bad beat-snap at ANY
+        // tempo can never hand AVAssetExportSession an invalid composition
+        // (-11841 "Operation Stopped").
+        let validatedInstructions = repairForExport(
+            composition: composition,
+            instructions: instructions,
+            totalDuration: totalDuration)
+        videoComposition.instructions = validatedInstructions
+
+        // Snapshot the assembled pieces for white-box regression tests.
+        // References only — no copy, no behavior change.
         self.lastAssembled = AssembledComposition(
             composition: composition,
             videoComposition: videoComposition,
             audioMix: mix,
             totalDuration: totalDuration,
-            instructions: instructions)
+            instructions: validatedInstructions)
 
         // ─── Stage: exportSetup ─────────────────────────────────────
         // Prefer AVAssetExportPresetHEVC1920x1080 — it targets ~14 Mbps
@@ -406,6 +460,14 @@ final class ReelComposer {
             case .completed:
                 break
             case .failed, .cancelled:
+                // Log the EXACT failing values, never a generic message:
+                // error domain/code/reason + the composition shape that was
+                // handed to the exporter (so a -11841 is debuggable).
+                let ns = session.error as NSError?
+                let durs = validatedInstructions.map {
+                    String(format: "%.3f", $0.timeRange.duration.seconds)
+                }.joined(separator: ",")
+                log.error("Export FAILED status=\(session.status.rawValue) error=\(ns?.domain ?? "nil", privacy: .public) code=\(ns?.code ?? 0) reason=\(ns?.localizedDescription ?? "nil", privacy: .public) | total=\(totalDuration.seconds, format: .fixed(precision: 3))s instr=\(validatedInstructions.count) durs=[\(durs, privacy: .public)]")
                 throw PipelineError.compositionFailed(
                     session.error?.localizedDescription ?? "Export failed")
             default:
@@ -504,6 +566,76 @@ final class ReelComposer {
             "Export reported completed but output file is missing or empty")
     }
 
+    // MARK: - Pre-export validator (Section 1 — tempo-proof)
+
+    /// Guarantees the composition is valid for AVAssetExportSession,
+    /// REPAIRING rather than failing. Returns the (possibly re-tiled)
+    /// instruction list and mutates audio tracks in place. Logs the EXACT
+    /// offending values on any repair so a tempo regression is debuggable,
+    /// never a generic message.
+    private func repairForExport(composition: AVMutableComposition,
+                                 instructions: [MetalPetalInstruction],
+                                 totalDuration: CMTime) -> [MetalPetalInstruction] {
+        // 1. ≤2 video tracks (A/B). Can't safely drop one; log loudly.
+        let videoTracks = composition.tracks(withMediaType: .video)
+        if videoTracks.count > 2 {
+            log.error("Pre-export: \(videoTracks.count) video tracks (>2) — composition over-built")
+        }
+
+        // 2. Re-tile instructions into EXACT [.zero, total] contiguity:
+        //    drop any zero-duration instruction, close any rounding gap,
+        //    force the last instruction to end exactly at total.
+        let sorted = instructions.sorted {
+            CMTimeCompare($0.timeRange.start, $1.timeRange.start) < 0
+        }
+        var cursor = CMTime.zero
+        var repaired: [MetalPetalInstruction] = []
+        var didRepair = false
+        for (i, ins) in sorted.enumerated() {
+            let isLast = (i == sorted.count - 1)
+            let desiredEnd = isLast
+                ? totalDuration
+                : CMTimeMinimum(CMTimeAdd(cursor, ins.timeRange.duration),
+                                totalDuration)
+            let dur = CMTimeSubtract(desiredEnd, cursor)
+            guard dur.seconds > 0.0001 else {
+                log.error("Pre-export: dropping zero/negative instruction \(i) (orig [\(ins.timeRange.start.seconds, format: .fixed(precision: 4)), \(ins.timeRange.end.seconds, format: .fixed(precision: 4))]s)")
+                didRepair = true
+                continue
+            }
+            let newRange = CMTimeRange(start: cursor, duration: dur)
+            if newRange == ins.timeRange {
+                repaired.append(ins)
+            } else {
+                didRepair = true
+                log.error("Pre-export re-tile instr \(i): [\(ins.timeRange.start.seconds, format: .fixed(precision: 4)), \(ins.timeRange.end.seconds, format: .fixed(precision: 4))] → [\(cursor.seconds, format: .fixed(precision: 4)), \(desiredEnd.seconds, format: .fixed(precision: 4))]s")
+                repaired.append(ins.reTiled(to: newRange, startSeconds: cursor.seconds))
+            }
+            cursor = desiredEnd
+        }
+        if !didRepair { repaired = instructions }
+
+        // 3. Every inserted audio track must be EXACTLY `total` long — an
+        //    A/V length mismatch is the other -11841 trigger. Trim if
+        //    longer, pad with silence if shorter; leave empty tracks alone.
+        for track in composition.tracks(withMediaType: .audio) {
+            let d = track.timeRange.duration
+            if CMTimeCompare(d, totalDuration) > 0 {
+                track.removeTimeRange(
+                    CMTimeRange(start: totalDuration,
+                                duration: CMTimeSubtract(d, totalDuration)))
+                log.error("Pre-export: trimmed audio track \(track.trackID) \(d.seconds, format: .fixed(precision: 3))s → \(totalDuration.seconds, format: .fixed(precision: 3))s")
+            } else if d.seconds > 0.0001, CMTimeCompare(d, totalDuration) < 0 {
+                track.insertEmptyTimeRange(
+                    CMTimeRange(start: d, duration: CMTimeSubtract(totalDuration, d)))
+                log.info("Pre-export: padded audio track \(track.trackID) \(d.seconds, format: .fixed(precision: 3))s → \(totalDuration.seconds, format: .fixed(precision: 3))s")
+            }
+        }
+
+        log.info("Pre-export validator OK: \(repaired.count) instructions tile [0, \(totalDuration.seconds, format: .fixed(precision: 2))]s, ≤2 video tracks, audio matched (repaired=\(didRepair))")
+        return repaired
+    }
+
     // MARK: - Clip insertion (handles speed curve + B-track for transitions)
 
     private func insertClip(_ clip: ClipPlan,
@@ -554,10 +686,16 @@ final class ReelComposer {
             insertTime = CMTimeAdd(insertTime, scaled)
         }
 
+        // Use EXACT CMTime math for the instruction's time range: its end
+        // must equal `insertTime` (the next clip's start) to the tick, so
+        // instructions tile [.zero, total] with no gap/overlap. Rebuilding
+        // the duration from `renderedDur` seconds at timescale 600 (the old
+        // path) could round a tick off `insertTime` and open a sub-frame
+        // gap — exactly the kind of invalid composition that exports as
+        // -11841 "Operation Stopped".
         let renderedDur = insertTime.seconds - segmentStart.seconds
         let outRange = CMTimeRange(start: segmentStart,
-                                   duration: CMTime(seconds: renderedDur,
-                                                    preferredTimescale: 600))
+                                   duration: CMTimeSubtract(insertTime, segmentStart))
 
         // Build the per-clip transition spec. The B-track gets the head
         // of the *next* clip's source so the compositor can blend real
