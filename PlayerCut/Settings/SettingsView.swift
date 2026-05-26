@@ -58,6 +58,7 @@ struct SettingsView: View {
                                         in: RoundedRectangle(cornerRadius: Theme.Radius.card))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("open-diagnostics")
                         Text("PlayerCut never stores your child's video. Reels live in your Photos. Raw recordings are deleted the moment the reel is made.")
                             .font(.pcCaption)
                             .foregroundStyle(Theme.textSecondary)

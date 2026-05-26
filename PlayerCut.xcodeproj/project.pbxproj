@@ -57,6 +57,7 @@
 		973D37FB0B8590D6F3869DDA /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36946E4469D60B7F569114E3 /* Storage.swift */; };
 		98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */; };
 		99CD55CC54FB7CD35A0ADC5C /* MetalPetal in Frameworks */ = {isa = PBXBuildFile; productRef = B7C7E0E16EA902DC894D7AA9 /* MetalPetal */; };
+		99FC3195A65665B088EC612C /* TitleFrameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33A6BDFC34EA484A0E009C35 /* TitleFrameTests.swift */; };
 		9B6CB776FD4814614C68201A /* cinematic_5.m4a in Resources */ = {isa = PBXBuildFile; fileRef = ABEFF6C14BB1A9BD0C5460B8 /* cinematic_5.m4a */; };
 		9BD893A163C8F863EDB1C129 /* EditPlanBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0DF7EAB0BC523AAFD00A41C /* EditPlanBuilder.swift */; };
 		9CB02794E9FDA8DE11CFE335 /* PlayerCutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7497571612E03DE355B52CD3 /* PlayerCutUITests.swift */; };
@@ -65,6 +66,7 @@
 		A5BFF6417DDFD519FF73189C /* LUTFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46CCE07A6E2B577DADAF5544 /* LUTFactory.swift */; };
 		A6F41FC3E70E12C7BE36210F /* energetic_3.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 4C653CF2C73129FFD1E90355 /* energetic_3.m4a */; };
 		A6F5B35DE78B44D93CD668C6 /* playful_2.m4a in Resources */ = {isa = PBXBuildFile; fileRef = EF2985FA50AC2377993975AF /* playful_2.m4a */; };
+		AA190CE17C948EDEFD1EA344 /* PreRecordSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B46A953614CD72FEE7235DF /* PreRecordSheet.swift */; };
 		AAFAFC89E3DAF7A44493BBDB /* ReelComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */; };
 		AC884A0EE2C853B09CF99F29 /* Stage1CoarseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4ABAD3A6EB6390A240D3D85 /* Stage1CoarseDetector.swift */; };
 		AD09D28462766010CD8C2FF7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 187D5FFFEF59F0D468549019 /* SettingsView.swift */; };
@@ -114,6 +116,7 @@
 		2D013E23F01E91D1ECCB2565 /* MetalPetalCompositor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalPetalCompositor.swift; sourceTree = "<group>"; };
 		2F956EE8BE9485A59C0B7A32 /* ReelComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelComposer.swift; sourceTree = "<group>"; };
 		3005B7F01FC9B5D7223D127F /* PlayerCut.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PlayerCut.entitlements; sourceTree = "<group>"; };
+		33A6BDFC34EA484A0E009C35 /* TitleFrameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleFrameTests.swift; sourceTree = "<group>"; };
 		33DB14ED78F33CE1DF36DF10 /* cinematic_1.m4a */ = {isa = PBXFileReference; path = cinematic_1.m4a; sourceTree = "<group>"; };
 		36946E4469D60B7F569114E3 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
 		3F7851FE3324E34A43A322CD /* StringDistance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringDistance.swift; sourceTree = "<group>"; };
@@ -129,6 +132,7 @@
 		633792CC35061969E97C24D8 /* playful_1.m4a */ = {isa = PBXFileReference; path = playful_1.m4a; sourceTree = "<group>"; };
 		66D00ECD5C55F39FB0B691F9 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		6A1075CB059A40D14F1DB938 /* BackgroundProcessingV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundProcessingV2.swift; sourceTree = "<group>"; };
+		6B46A953614CD72FEE7235DF /* PreRecordSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreRecordSheet.swift; sourceTree = "<group>"; };
 		6C2005FC315966CE25921AC7 /* SubjectTrackSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubjectTrackSelector.swift; sourceTree = "<group>"; };
 		6C213546B194076C52C3DF88 /* FrameIterator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameIterator.swift; sourceTree = "<group>"; };
 		6E7ABDAF036E48F430861357 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
@@ -305,6 +309,7 @@
 				E6A803F76A9A50B91E65A996 /* SampleVideoFactory.swift */,
 				CA52F250C481A8DD4DC73271 /* SampleVideoPipelineTests.swift */,
 				F25B19609EF850B4C81711AA /* SubjectFollowTests.swift */,
+				33A6BDFC34EA484A0E009C35 /* TitleFrameTests.swift */,
 			);
 			path = PlayerCutTests;
 			sourceTree = "<group>";
@@ -461,6 +466,7 @@
 			children = (
 				B24D4CA15A14D5F147D77A85 /* CaptureView.swift */,
 				5EF92EE722574193DFC45FD7 /* DeviceCapabilities.swift */,
+				6B46A953614CD72FEE7235DF /* PreRecordSheet.swift */,
 			);
 			path = Capture;
 			sourceTree = "<group>";
@@ -680,6 +686,7 @@
 				1C48996C7F483E9693707056 /* PixelBufferPool.swift in Sources */,
 				98E2A3D1515BECC82A677D9E /* PlayerCutApp.swift in Sources */,
 				8CC6122976232C93636205B9 /* PoseSignal.swift in Sources */,
+				AA190CE17C948EDEFD1EA344 /* PreRecordSheet.swift in Sources */,
 				BBCF8244D5F44AB0451C1056 /* PricingModel.swift in Sources */,
 				AAFAFC89E3DAF7A44493BBDB /* ReelComposer.swift in Sources */,
 				AD09D28462766010CD8C2FF7 /* SettingsView.swift in Sources */,
@@ -705,6 +712,7 @@
 				15DB9DEE7017F9FF9C5D8FEC /* SampleVideoFactory.swift in Sources */,
 				BF8B13FA4269D5894C957255 /* SampleVideoPipelineTests.swift in Sources */,
 				1BE0CF976A14B5F6626FB6E6 /* SubjectFollowTests.swift in Sources */,
+				99FC3195A65665B088EC612C /* TitleFrameTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
