@@ -151,4 +151,27 @@ final class ExportTempoTests: XCTestCase {
                            "bpm \(bpm): tiling must cover the full composition")
         }
     }
+
+    // MARK: - 3. The chosen reel length actually drives the reel duration
+
+    func testReelLengthDrivesReelDuration() {
+        // 60 well-separated strong moments — enough to fill the longest reel.
+        let moments: [ScoredMoment] = (0..<60).map { i in
+            let center = 30 + Double(i) * 20
+            let w = CandidateWindow(id: UUID(), startTime: center - 4, endTime: center + 4,
+                                    audioScore: 0.7, motionScore: 0.7)
+            return ScoredMoment(id: UUID(), window: w,
+                                identificationConfidence: 0.7, activityScore: 0.7,
+                                playerBoundingBoxes: [], compositeScore: 0.7)
+        }
+        let short = HighlightRanker(config: .for(length: .sixtySeconds))
+            .selectClips(from: moments, videoDuration: 1300)
+        let long = HighlightRanker(config: .for(length: .threeMinutes))
+            .selectClips(from: moments, videoDuration: 1300)
+
+        XCTAssertGreaterThan(long.selected.count, short.selected.count,
+                             "A longer reel length must select more clips")
+        XCTAssertGreaterThan(long.totalDuration, short.totalDuration,
+                             "A longer reel length must yield a longer reel (\(long.totalDuration)s vs \(short.totalDuration)s)")
+    }
 }

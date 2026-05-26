@@ -45,6 +45,13 @@ actor PipelineOrchestrator {
         }
     }
 
+    /// Persisted status of a game, or nil if it's gone. Lets the
+    /// background queue purge permanently-failed (poison) games instead of
+    /// retrying — and re-logging — them every launch.
+    func gameStatus(id: UUID) async -> GameStatus? {
+        (try? await store.game(id: id))?.status
+    }
+
     enum Progress: Sendable {
         case stage1Started
         case stage1Completed(candidateCount: Int)

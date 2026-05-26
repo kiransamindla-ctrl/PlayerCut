@@ -193,9 +193,7 @@ final class ReelComposer {
         var insertTime = CMTime.zero
         var instructions: [MetalPetalInstruction] = []
         var audioDuckRanges: [CMTimeRange] = []
-        var firstBodyOutputStart: Double = 0
-        var lastBodyOutputEnd: Double = 0
-        var closingStart: Double = 0
+        var lastBodyOutputEnd: Double = 0   // drives the closing music fade
         let reframeStart = Date()
 
         // Pre-rasterize title / closing / lower-third images once. They
@@ -243,7 +241,6 @@ final class ReelComposer {
             }
 
             // Body ----------------------------------------------------------
-            firstBodyOutputStart = insertTime.seconds
             for (i, clip) in plan.body.enumerated() {
                 let isLast = (i == plan.body.count - 1)
                 let next: ClipPlan? = isLast ? nil : plan.body[i + 1]
@@ -277,7 +274,6 @@ final class ReelComposer {
             lastBodyOutputEnd = insertTime.seconds
 
             // Closing card --------------------------------------------------
-            closingStart = insertTime.seconds
             if enableClosingCard, plan.closingCard != nil {
                 let cardDuration = ClosingCardSpec.duration
                 try insertOverlayCard(duration: cardDuration,

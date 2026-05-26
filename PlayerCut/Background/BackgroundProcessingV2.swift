@@ -90,6 +90,9 @@ final class BackgroundProcessingV2 {
         log.info("BG registration: processing=\(registered1), refresh=\(registered2)")
 
         loadQueue()
+        // Poison-queue cleanup: drop any already-permanently-failed games at
+        // launch so they never re-run (and re-spam the log) every session.
+        Task { @MainActor in await self.purgeFailedGames() }
 
         // Hook app lifecycle: when the app is foregrounded with pending work,
         // start the foreground runner so users don't sit waiting on iOS.
@@ -116,6 +119,23 @@ final class BackgroundProcessingV2 {
     }
 
     // MARK: - Public API
+
+    /// Removes any queued game whose persisted status is `.failed`, so a
+    /// permanently-failed (poison) recording can't retry — and re-log —
+    /// on every launch. Called once at registration.
+    private func purgeFailedGames() async {
+        guard let orchestrator else { return }
+        var removed = 0
+        for id in queue where await orchestrator.gameStatus(id: id) == .failed {
+            queue.removeAll { $0 == id }
+            removed += 1
+            log.warning("Purged permanently-failed game \(id.uuidString) from launch queue (re-record to retry)")
+        }
+        if removed > 0 {
+            saveQueue()
+            log.info("Poison-queue cleanup removed \(removed) failed game(s); queue size now \(self.queue.count)")
+        }
+    }
 
     func enqueueGame(_ id: UUID) {
         guard !queue.contains(id) else { return }
@@ -284,9 +304,17 @@ final class BackgroundProcessingV2 {
                     queue.removeAll { $0 == next }
                     saveQueue()
                     Task { await DiagnosticsStore.shared.increment(.foregroundFallbackCompleted) }
+                } else if await orchestrator?.gameStatus(id: next) == .failed {
+                    // Permanently-failed (poison) game: drop it from the queue
+                    // so it doesn't re-run — and re-spam the log — on every
+                    // launch. The user re-records to retry.
+                    queue.removeAll { $0 == next }
+                    saveQueue()
+                    log.warning("Purged permanently-failed game \(next.uuidString) from queue (re-record to retry)")
+                    continue
                 } else {
-                    // If we failed in foreground, don't loop forever — let
-                    // the user retry manually or wait for next BG window.
+                    // Transient failure (e.g. ran out of foreground time):
+                    // leave it queued and stop; retry next BG window / launch.
                     break
                 }
             }

@@ -42,10 +42,11 @@ struct PreRecordSheet: View {
     }
 
     private let tips: [(icon: String, text: String)] = [
-        ("rectangle.landscape.rotate", "Film in landscape, steady — a tripod or railing beats handheld."),
+        ("rectangle.landscape.rotate", "Film in landscape on a steady mount — a tripod or railing beats handheld."),
         ("person.and.arrow.left.and.arrow.right", "Stand back ~10–15 ft and keep your whole player in frame. Don't zoom in and out."),
         ("sun.max", "Good, even light helps — try not to shoot straight into the sun."),
-        ("clock.arrow.circlepath", "Record the whole game. PlayerCut finds the highlights for you.")
+        ("clock.arrow.circlepath", "Record the whole game. PlayerCut finds the highlights for you."),
+        ("bolt.fill", "For the fastest reel: keep the phone on a charger, on Wi-Fi, with PlayerCut open while it processes.")
     ]
 
     var body: some View {
