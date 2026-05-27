@@ -548,15 +548,16 @@ final class MusicLibraryTests: XCTestCase {
 
     @MainActor
     func testBPMSpecBaseline() {
-        // Sanity-check a handful of the BPMs the spec calls out.
-        // Catches a manifest substitution that swaps tempos under us.
+        // Sanity-check a handful of the real, audio-detected BPMs from the
+        // bundled Pixabay tracks (see PlayerCut/Music/LICENSES.md). Catches
+        // a manifest substitution that swaps tempos under us.
         let byId = Dictionary(uniqueKeysWithValues:
             MusicLibrary.shared.allTracks.map { ($0.id, $0) })
-        XCTAssertEqual(byId["energetic_1"]?.bpm, 140)
-        XCTAssertEqual(byId["energetic_3"]?.bpm, 150)
-        XCTAssertEqual(byId["cinematic_3"]?.bpm, 78)
-        XCTAssertEqual(byId["playful_5"]?.bpm, 128)
-        XCTAssertEqual(byId["chill_4"]?.bpm, 80)
+        XCTAssertEqual(byId["energetic_1"]?.bpm, 138)
+        XCTAssertEqual(byId["energetic_3"]?.bpm, 140)
+        XCTAssertEqual(byId["cinematic_3"]?.bpm, 125)
+        XCTAssertEqual(byId["playful_5"]?.bpm, 127)
+        XCTAssertEqual(byId["chill_4"]?.bpm, 88)
     }
 }
 

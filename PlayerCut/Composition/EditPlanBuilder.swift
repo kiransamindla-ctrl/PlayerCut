@@ -167,31 +167,38 @@ struct EditPlanBuilder {
         let log = Logger(subsystem: "com.playercut.app", category: "BeatSnap")
         log.info("beat-snap: bpm=\(bpm, format: .fixed(precision: 1)) beat=\(beatPeriod, format: .fixed(precision: 3))s snapUnit=\(snapUnit, format: .fixed(precision: 3))s")
 
-        return clips.map { clip in
+        // HARD FLOORS — a snapped clip may NEVER drop below these, at any
+        // tempo. Below them the composition becomes degenerate and export
+        // dies with -11841 "Operation Stopped" (seen at 140 BPM × 10 clips
+        // where snapUnit is tiny). If a snap would violate a floor we keep
+        // the clip UNSNAPPED rather than trim it to death.
+        let minRenderedSeconds = 0.6   // shortest rendered clip we'll allow
+        let minSourceSeconds = 0.5     // shortest source slice we'll allow
+
+        return clips.enumerated().map { (i, clip) in
             let segments = clip.speedCurve.segments
-            // k = sum((fracEnd - fracStart) / factor)
-            // rendered = sourceDur * k
+            // k = sum((fracEnd - fracStart) / factor); rendered = sourceDur * k
             let k = segments.reduce(0.0) { acc, s in
                 acc + (s.sourceFractionEnd - s.sourceFractionStart)
                     / max(0.01, s.factor)
             }
             guard k > 0 else { return clip }
             let currentRendered = clip.sourceDuration * k
-            let beats = max(2.0,
-                            (currentRendered / snapUnit).rounded())
+            let beats = max(2.0, (currentRendered / snapUnit).rounded())
             let targetRendered = beats * snapUnit
             let newSourceDur = targetRendered / k
-            guard newSourceDur >= 1.0 else {
-                log.warning("beat-snap: skipping clip (sourceDur \(newSourceDur, format: .fixed(precision: 2))s < 1.0s after snap)")
-                return clip
-            }
-            // Don't extend past the original sourceEnd — only trim.
-            guard newSourceDur <= clip.sourceDuration else {
+
+            // Floor checks — keep unsnapped if any would be violated. Log the
+            // exact values so a tempo regression is debuggable, never generic.
+            guard targetRendered >= minRenderedSeconds,
+                  newSourceDur >= minSourceSeconds,
+                  newSourceDur <= clip.sourceDuration else {
+                log.warning("beat-snap clip \(i): UNSNAPPED — would break floor (rendered \(currentRendered, format: .fixed(precision: 2))→\(targetRendered, format: .fixed(precision: 2))s, src \(clip.sourceDuration, format: .fixed(precision: 2))→\(newSourceDur, format: .fixed(precision: 2))s, snapUnit \(snapUnit, format: .fixed(precision: 3))s, bpm \(bpm, format: .fixed(precision: 0)))")
                 return clip
             }
             var snapped = clip
             snapped.sourceEnd = clip.sourceStart + newSourceDur
-            log.info("beat-snap: \(currentRendered, format: .fixed(precision: 2))s → \(targetRendered, format: .fixed(precision: 2))s (\(Int(beats)) beats)")
+            log.info("beat-snap clip \(i): \(currentRendered, format: .fixed(precision: 2))s → \(targetRendered, format: .fixed(precision: 2))s (\(Int(beats)) beats)")
             return snapped
         }
     }

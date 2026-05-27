@@ -557,6 +557,23 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
         super.init()
     }
 
+    /// Returns a copy with a corrected time range (and matching
+    /// startSeconds), used by the pre-export validator to re-tile
+    /// instructions into exact [.zero, total] contiguity.
+    func reTiled(to range: CMTimeRange, startSeconds: Double) -> MetalPetalInstruction {
+        MetalPetalInstruction(
+            timeRange: range,
+            startSeconds: startSeconds,
+            trackAID: trackAID,
+            trackBID: trackBID,
+            cropKeyframes: cropKeyframes,
+            look: look,
+            transitionKind: transitionKind,
+            transitionStart: transitionStart,
+            transitionEnd: transitionEnd,
+            overlay: overlay)
+    }
+
     var enablePostProcessing: Bool { false }
     var containsTweening: Bool { true }
     var requiredSourceTrackIDs: [NSValue]? {
