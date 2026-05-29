@@ -194,16 +194,27 @@ final class SampleVideoPipelineTests: XCTestCase {
                                      "No instruction may extend past the composition")
         }
 
-        // Audio timeline == video timeline. Any inserted audio track (the
-        // music bed here; the game-audio track is empty for this
-        // video-only source) must match the composition duration so the
-        // A/V-mismatch -11841 can't fire.
+        // A/V invariant (-11841 guard): NO audio track may exceed the video
+        // timeline. Shorter is fine — the title and closing cards are
+        // silent overlays, so the game-audio track legitimately has gaps;
+        // the pre-export validator inserts empty padding that the export
+        // honors even though AVMutableCompositionTrack.timeRange only
+        // reports the media-bearing extent. We additionally assert that AT
+        // LEAST ONE audio track spans the full reel (the music bed) so the
+        // reel doesn't end in silence before the closing card finishes.
         for at in assembled.composition.tracks(withMediaType: .audio)
         where at.timeRange.duration.seconds > 0 {
-            XCTAssertEqual(at.timeRange.duration.seconds,
-                           assembled.totalDuration.seconds, accuracy: 0.05,
-                           "Inserted audio tracks must match the video timeline")
+            XCTAssertLessThanOrEqual(at.timeRange.duration.seconds,
+                                     assembled.totalDuration.seconds + 0.05,
+                                     "Audio track must not exceed video timeline (-11841 trigger)")
         }
+        let hasFullAudioCoverage = assembled.composition
+            .tracks(withMediaType: .audio)
+            .contains {
+                abs($0.timeRange.duration.seconds - assembled.totalDuration.seconds) < 0.1
+            }
+        XCTAssertTrue(hasFullAudioCoverage,
+                      "At least one audio track (the music bed) should span the full reel")
 
         // 8. Per-stage proof that the right things actually happened on the
         //    sample-video reel — not just that a file came out.

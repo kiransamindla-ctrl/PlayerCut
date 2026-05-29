@@ -83,6 +83,10 @@ final class ReelComposer {
     /// Result with savedToPhotos == false and skips PhotosLibraryService
     /// entirely.
     var savesToPhotos: Bool = true
+    /// User-tunable reel knobs (game-audio toggle + levels, pacing, order).
+    /// Read fresh from UserDefaults at compose() time by default; tests can
+    /// override this on a per-instance basis.
+    var settings: ReelSettings = .current
     /// Cross-clip blend duration. Compositor clamps to ≤ 25 % of the
     /// shorter of the two clip's rendered duration.
     var transitionDuration: Double = 0.45
@@ -213,9 +217,35 @@ final class ReelComposer {
                                                       size: plan.output.size)
                                           : nil)
 
+        // ─── Section 1: per-clip audio peak detection ────────────────
+        // Drives the music duck + game-audio boost on the loudest 1–2 s of
+        // each clip — the cheer / whistle / contact "hit" — rather than
+        // guessing from the ranker's energy score. Skipped when the source
+        // has no audio (sample-only test path) or the user has switched
+        // off "Include game audio" in Settings.
+        var clipPeaks: [UUID: Double] = [:]
+        if settings.includeGameAudio, let assetAudioTrack {
+            if let cold = plan.coldOpen,
+               let p = await AudioPeakDetector.detectPeakOffset(
+                in: assetAudioTrack,
+                sourceStart: cold.sourceStart, sourceEnd: cold.sourceEnd) {
+                clipPeaks[cold.id] = p
+            }
+            for clip in plan.body {
+                if let p = await AudioPeakDetector.detectPeakOffset(
+                    in: assetAudioTrack,
+                    sourceStart: clip.sourceStart, sourceEnd: clip.sourceEnd) {
+                    clipPeaks[clip.id] = p
+                }
+            }
+            let totalClips = plan.body.count + (plan.coldOpen == nil ? 0 : 1)
+            log.info("Peak detection: \(clipPeaks.count)/\(totalClips) clips have a usable source peak")
+        }
+
         do {
             // Cold open ----------------------------------------------------
             if let cold = plan.coldOpen {
+                let coldStart = insertTime
                 try insertClip(cold,
                                trackA: trackA,
                                trackB: trackB,
@@ -227,6 +257,11 @@ final class ReelComposer {
                                instructions: &instructions,
                                nextClip: nil,
                                overlay: nil)
+                appendPeakBand(for: cold,
+                               segmentStart: coldStart,
+                               segmentEnd: insertTime,
+                               peakSourceOffset: clipPeaks[cold.id],
+                               into: &audioDuckRanges)
             }
 
             // Title card (compositor synthesizes black; overlay paints) -----
@@ -250,6 +285,7 @@ final class ReelComposer {
                                             startSeconds: insertTime.seconds,
                                             spec: plan.lowerThird)
                     : nil)
+                let clipStart = insertTime
                 try insertClip(clip,
                                trackA: trackA,
                                trackB: trackB,
@@ -261,15 +297,11 @@ final class ReelComposer {
                                instructions: &instructions,
                                nextClip: next,
                                overlay: overlay)
-                if clip.energy >= 0.6 {
-                    let dur = max(0.3, min(0.9, Double(clip.renderedDuration)))
-                    let start = insertTime - CMTime(seconds: dur,
-                                                    preferredTimescale: 600)
-                    audioDuckRanges.append(
-                        CMTimeRange(start: start,
-                                    duration: CMTime(seconds: dur,
-                                                     preferredTimescale: 600)))
-                }
+                appendPeakBand(for: clip,
+                               segmentStart: clipStart,
+                               segmentEnd: insertTime,
+                               peakSourceOffset: clipPeaks[clip.id],
+                               into: &audioDuckRanges)
             }
             lastBodyOutputEnd = insertTime.seconds
 
@@ -321,69 +353,69 @@ final class ReelComposer {
             }
         }
 
+        // Section 1: every reel knob (toggle + dB sliders + duck depth +
+        // game-audio boost) comes from `settings`, refreshed per compose.
+        let s = settings
+        let musicLevel     = ReelSettings.linearGain(db: s.musicLevelDb)
+        let musicDuckLevel = ReelSettings.linearGain(db: s.musicLevelDb - s.duckDepthDb)
+        let gameLevel      = ReelSettings.linearGain(db: s.gameAudioLevelDb)
+        let gamePeakLevel  = ReelSettings.linearGain(db: s.gameAudioLevelDb + s.gameAudioBoostDb)
+        let total = totalDuration.seconds
+
+        // Merge the peak bands once — used by BOTH the music duck and the
+        // game-audio boost so they're in sync (music dips ↘ exactly when
+        // game audio rises ↗). Merge anything within attack+release so the
+        // emitter never has to clamp overlapping ramps.
+        let musicDuckAttack = 0.35   // // SOURCE: broadcast duck envelopes
+        let musicDuckRelease = 0.55  //          (250-500 ms attack, 500-900 ms release)
+        let gameAttack = 0.25
+        let gameRelease = 0.40
+        let mergeWindow = max(musicDuckAttack + musicDuckRelease,
+                              gameAttack + gameRelease)
+        let sortedDucks = audioDuckRanges
+            .map { (s: $0.start.seconds, e: $0.end.seconds) }
+            .sorted { $0.s < $1.s }
+        var mergedPeaks: [(s: Double, e: Double)] = []
+        for d in sortedDucks {
+            if var last = mergedPeaks.last,
+               d.s <= last.e + mergeWindow {
+                last.e = max(last.e, d.e)
+                mergedPeaks[mergedPeaks.count - 1] = last
+            } else {
+                mergedPeaks.append(d)
+            }
+        }
+
         let mix = AVMutableAudioMix()
-        if let audioTrack, assetAudioTrack != nil {
+
+        // ─── Game audio: low bed + boost on each peak band ──────────────
+        // Gated on includeGameAudio (Settings → Reel Audio) AND on the
+        // source actually carrying audio (the sample test path may not).
+        if s.includeGameAudio, let audioTrack, assetAudioTrack != nil {
             let params = AVMutableAudioMixInputParameters(track: audioTrack)
-            params.setVolume(gameAudioVolume, at: .zero)
+            params.setVolume(gameLevel, at: .zero)
+            var ramps: [(start: Double, end: Double, from: Float, to: Float)] = []
+            for m in mergedPeaks {
+                ramps.append((m.s, m.s + gameAttack, gameLevel, gamePeakLevel))
+                ramps.append((m.e, m.e + gameRelease, gamePeakLevel, gameLevel))
+            }
+            emitNonOverlappingRamps(ramps, total: total, onto: params)
             mix.inputParameters.append(params)
         }
-        // Only build the music duck/fade envelope when music was actually
-        // inserted — ramps on an empty track produce an invalid audio mix.
+
+        // ─── Music bed: duck on each peak band + always-on closing fade ──
+        // Only built when music was actually inserted (ramps on an empty
+        // track produce an invalid audio mix).
         if let musicTrack, musicInserted {
             let params = AVMutableAudioMixInputParameters(track: musicTrack)
-            params.setVolume(musicBedVolume, at: .zero)
-            // Duck envelope: 350 ms in, 550 ms out. // SOURCE: typical
-            // broadcast duck envelopes (250-500 ms attack, 500-900 ms
-            // release).
-            //
-            // CRITICAL: AVMutableAudioMixInputParameters throws
-            // "the timeRange of a ramp must not overlap the timeRange of an
-            // existing ramp" if any two ramps overlap — which happens with
-            // densely-spaced clips at a fast tempo (10 clips × 0.6 s). So we
-            // build ALL candidate ramps, then emit them strictly ordered and
-            // clamped to never overlap and never exceed the composition.
-            let duckAttack = 0.35
-            let duckRelease = 0.55
-            let total = totalDuration.seconds
+            params.setVolume(musicLevel, at: .zero)
             var ramps: [(start: Double, end: Double, from: Float, to: Float)] = []
-
-            // Merge duck ranges that are closer than attack+release so their
-            // in/out ramps can't collide; one consolidated dip instead.
-            let sortedDucks = audioDuckRanges
-                .map { (s: $0.start.seconds, e: $0.end.seconds) }
-                .sorted { $0.s < $1.s }
-            var merged: [(s: Double, e: Double)] = []
-            for d in sortedDucks {
-                if var last = merged.last,
-                   d.s <= last.e + duckAttack + duckRelease {
-                    last.e = max(last.e, d.e)
-                    merged[merged.count - 1] = last
-                } else {
-                    merged.append(d)
-                }
+            for m in mergedPeaks {
+                ramps.append((m.s, m.s + musicDuckAttack, musicLevel, musicDuckLevel))
+                ramps.append((m.e, m.e + musicDuckRelease, musicDuckLevel, musicLevel))
             }
-            for m in merged {
-                ramps.append((m.s, m.s + duckAttack, musicBedVolume, musicDuckVolume))
-                ramps.append((m.e, m.e + duckRelease, musicDuckVolume, musicBedVolume))
-            }
-            // Always-on closing fade to silence.
-            ramps.append((max(0, lastBodyOutputEnd), total, musicBedVolume, 0))
-
-            // Emit ordered, clamped so each ramp starts at/after the previous
-            // ramp's end and stays within [0, total] — guarantees no overlap.
-            var cursor = 0.0
-            for r in ramps.sorted(by: { $0.start < $1.start }) {
-                let s = max(r.start, cursor)
-                let e = min(r.end, total)
-                guard e > s + 0.001 else { continue }
-                params.setVolumeRamp(
-                    fromStartVolume: r.from,
-                    toEndVolume: r.to,
-                    timeRange: CMTimeRange(
-                        start: CMTime(seconds: s, preferredTimescale: 600),
-                        duration: CMTime(seconds: e - s, preferredTimescale: 600)))
-                cursor = e
-            }
+            ramps.append((max(0, lastBodyOutputEnd), total, musicLevel, 0))
+            emitNonOverlappingRamps(ramps, total: total, onto: params)
             mix.inputParameters.append(params)
         }
 
@@ -562,6 +594,79 @@ final class ReelComposer {
             "Export reported completed but output file is missing or empty")
     }
 
+    // MARK: - Peak-driven duck/boost band (Section 1)
+
+    /// Maps a clip's source-time peak offset into the corresponding output
+    /// time and appends a ~1.2 s band centered on it. ReelComposer's mix
+    /// step uses these bands to duck the music AND boost the game audio in
+    /// the same instant, so cheer/whistle/contact actually pops instead of
+    /// hiding under the bed.
+    private func appendPeakBand(for clip: ClipPlan,
+                                segmentStart: CMTime,
+                                segmentEnd: CMTime,
+                                peakSourceOffset: Double?,
+                                into ranges: inout [CMTimeRange]) {
+        guard let peakOff = peakSourceOffset else { return }
+        let outputPeakOffset = outputOffsetMapping(sourceOffset: peakOff, in: clip)
+        let outputPeak = segmentStart.seconds + outputPeakOffset
+        let segStartSec = segmentStart.seconds
+        let segEndSec = segmentEnd.seconds
+        // 1.2 s band (-0.4 s lead-in, +0.8 s tail) clamped inside the clip.
+        let bandStart = max(segStartSec, outputPeak - 0.4)
+        let bandEnd = min(segEndSec, outputPeak + 0.8)
+        guard bandEnd > bandStart + 0.1 else { return }
+        ranges.append(CMTimeRange(
+            start: CMTime(seconds: bandStart, preferredTimescale: 600),
+            duration: CMTime(seconds: bandEnd - bandStart, preferredTimescale: 600)))
+        log.info("Peak band clip \(clip.id.uuidString.prefix(8), privacy: .public): src \(peakOff, format: .fixed(precision: 2))s → out \(outputPeak, format: .fixed(precision: 2))s [\(bandStart, format: .fixed(precision: 2)), \(bandEnd, format: .fixed(precision: 2))]s")
+    }
+
+    /// Walks the clip's piecewise speed curve to convert a source-time
+    /// offset (in [0, sourceDuration]) into an output-time offset relative
+    /// to the clip's start in the rendered timeline.
+    private func outputOffsetMapping(sourceOffset s: Double,
+                                     in clip: ClipPlan) -> Double {
+        let srcDur = clip.sourceDuration
+        guard srcDur > 0 else { return 0 }
+        var out = 0.0
+        for seg in clip.speedCurve.segments {
+            let segSrcStart = seg.sourceFractionStart * srcDur
+            let segSrcEnd = seg.sourceFractionEnd * srcDur
+            let segSrcLen = max(0, segSrcEnd - segSrcStart)
+            if s >= segSrcEnd {
+                out += segSrcLen / max(0.01, seg.factor)
+                continue
+            }
+            let within = max(0, s - segSrcStart)
+            out += within / max(0.01, seg.factor)
+            return out
+        }
+        return out
+    }
+
+    /// Emits a list of (start, end, fromVol, toVol) ramps onto an
+    /// AVMutableAudioMixInputParameters in strictly-ordered, clamped form
+    /// so adjacent ramps NEVER overlap and never exceed [0, total]. This
+    /// is the rule AVMutableAudioMixInputParameters throws on if violated.
+    private func emitNonOverlappingRamps(
+        _ ramps: [(start: Double, end: Double, from: Float, to: Float)],
+        total: Double,
+        onto params: AVMutableAudioMixInputParameters) {
+        var cursor = 0.0
+        for r in ramps.sorted(by: { $0.start < $1.start }) {
+            let s = max(r.start, cursor)
+            let e = min(r.end, total)
+            guard e > s + 0.001 else { continue }
+            params.setVolumeRamp(
+                fromStartVolume: r.from,
+                toEndVolume: r.to,
+                timeRange: CMTimeRange(
+                    start: CMTime(seconds: s, preferredTimescale: 600),
+                    duration: CMTime(seconds: e - s, preferredTimescale: 600)))
+            cursor = e
+        }
+    }
+
     // MARK: - Pre-export validator (Section 1 — tempo-proof)
 
     /// Guarantees the composition is valid for AVAssetExportSession,
@@ -680,6 +785,30 @@ final class ReelComposer {
                 aTrack.scaleTimeRange(inserted, toDuration: scaled)
             }
             insertTime = CMTimeAdd(insertTime, scaled)
+        }
+
+        // Section 2: apex freeze. Tier-A heroes hold their last frame for
+        // freezeFrameSeconds before the cut — common pro effect. Insert a
+        // single source frame at clip.sourceEnd and scale it up to that
+        // duration. Game audio for the freeze is intentionally silent (we
+        // skip the audio re-insert here) so the music dip + crowd peak
+        // already in the speed-ramped tail aren't doubled up.
+        if clip.freezeFrameSeconds > 0.01 {
+            let frameSec = 1.0 / 30.0
+            let frameStart = max(clip.sourceStart, clip.sourceEnd - frameSec)
+            let frameRange = CMTimeRange(
+                start: CMTime(seconds: frameStart, preferredTimescale: 600),
+                duration: CMTime(seconds: frameSec, preferredTimescale: 600))
+            try trackA.insertTimeRange(frameRange,
+                                       of: assetVideoTrack,
+                                       at: insertTime)
+            let frameInserted = CMTimeRange(
+                start: insertTime,
+                duration: CMTime(seconds: frameSec, preferredTimescale: 600))
+            let frozen = CMTime(seconds: clip.freezeFrameSeconds,
+                                preferredTimescale: 600)
+            trackA.scaleTimeRange(frameInserted, toDuration: frozen)
+            insertTime = CMTimeAdd(insertTime, frozen)
         }
 
         // Use EXACT CMTime math for the instruction's time range: its end
