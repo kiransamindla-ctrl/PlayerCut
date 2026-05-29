@@ -51,52 +51,10 @@ enum TitleCardFactory {
                             animated: false)
     }
 
-    // MARK: - Legacy CoreAnimationTool overlay (no longer used by ReelComposer)
-
-    /// Build a transparent layer of `size` that holds animated title,
-    /// lower-third, and closing card sub-layers with CAAnimations.
-    /// Retained only for backward compatibility / debug; the cinematic
-    /// render path uses staticTitleLayer / staticClosingLayer /
-    /// staticLowerThirdLayer instead.
-    static func buildOverlay(size: CGSize,
-                             plan: EditPlan,
-                             titleStart: Double,
-                             lowerThirdStart: Double,
-                             closingStart: Double) -> CALayer {
-
-        let parent = CALayer()
-        parent.frame = CGRect(origin: .zero, size: size)
-        parent.isGeometryFlipped = false
-        parent.backgroundColor = UIColor.clear.cgColor
-
-        if let title = plan.titleCard {
-            let layer = makeTitleCardLayer(size: size,
-                                           spec: title,
-                                           startSeconds: titleStart,
-                                           duration: TitleCardSpec.duration,
-                                           animated: true)
-            parent.addSublayer(layer)
-        }
-
-        if let lower = plan.lowerThird {
-            let layer = makeLowerThirdLayer(size: size,
-                                            spec: lower,
-                                            startSeconds: lowerThirdStart,
-                                            animated: true)
-            parent.addSublayer(layer)
-        }
-
-        if let closing = plan.closingCard {
-            let layer = makeClosingCardLayer(size: size,
-                                             spec: closing,
-                                             startSeconds: closingStart,
-                                             duration: ClosingCardSpec.duration,
-                                             animated: true)
-            parent.addSublayer(layer)
-        }
-
-        return parent
-    }
+    // (Removed the legacy AVVideoCompositionCoreAnimationTool `buildOverlay`
+    //  path — it was unused dead code. The cinematic render path rasterizes
+    //  staticTitleLayer / staticClosingLayer / staticLowerThirdLayer through
+    //  the MetalPetal compositor instead.)
 
     // MARK: - Title card
 

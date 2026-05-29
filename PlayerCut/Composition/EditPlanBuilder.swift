@@ -69,6 +69,9 @@ struct EditPlanBuilder {
     let profile: PerfProfile
     let style: EditStyle
     let output: OutputSpec
+    /// User-tunable reel knobs (pacing tiers, slow-mo, hook-first). Read
+    /// fresh from UserDefaults by default; tests can pass an override.
+    let settings: ReelSettings
 
     /// Source video duration (used to clamp cold-open / clip windows).
     let sourceDuration: Double
@@ -76,11 +79,13 @@ struct EditPlanBuilder {
     init(style: EditStyle,
          output: OutputSpec,
          sourceDuration: Double,
-         profile: PerfProfile = .highEnd) {
+         profile: PerfProfile = .highEnd,
+         settings: ReelSettings = .current) {
         self.style = style
         self.output = output
         self.sourceDuration = sourceDuration
         self.profile = profile
+        self.settings = settings
     }
 
     func build(from plan: ReelPlan,
@@ -99,9 +104,22 @@ struct EditPlanBuilder {
            let idx = bodyMoments.firstIndex(where: { $0.moment.id == cold.id }) {
             bodyMoments.remove(at: idx)
         }
+
+        // Section 2: pacing tiers. Top numHeroClips by score become
+        // "hero" (long hold + slow-mo + apex freeze), the next ~30% are
+        // "feature" (standard), the rest "filler" (tight). When
+        // heroPacing is OFF every clip is .feature so the pre-existing
+        // uniform behavior is preserved.
+        let tiers = settings.heroPacing
+            ? assignTiers(to: bodyMoments,
+                          numHero: settings.numHeroClips)
+            : Dictionary(uniqueKeysWithValues:
+                bodyMoments.map { ($0.moment.id, PacingTier.feature) })
+
         let body = bodyMoments.enumerated().map { (i, sel) in
             buildBodyClip(from: sel,
-                          isLast: i == bodyMoments.count - 1)
+                          isLast: i == bodyMoments.count - 1,
+                          tier: tiers[sel.moment.id] ?? .feature)
         }
 
         // Beat grid: derive from BPM if available, else use a per-style
@@ -117,7 +135,20 @@ struct EditPlanBuilder {
         // (>130 BPM) snap to half-beats so the pacing doesn't feel
         // stiff. Cold open + cards are left unsnapped; the ramped
         // cold-open intentionally swallows the first downbeat.
-        let snappedBody = snapToBeats(body, bpm: bpm)
+        var snappedBody = snapToBeats(body, bpm: bpm)
+
+        // Section 3: hook-first. The strongest body clip leads — viewers
+        // drop off after 20-60 s on a sports reel, so we open with the
+        // hit. Rest stays chronological behind it. Gated on Settings →
+        // Reel Order so the user can A/B against the original ordering.
+        if settings.hookFirst, snappedBody.count > 1 {
+            if let topIdx = snappedBody.indices.max(by: {
+                snappedBody[$0].energy < snappedBody[$1].energy
+            }), topIdx != 0 {
+                let hook = snappedBody.remove(at: topIdx)
+                snappedBody.insert(hook, at: 0)
+            }
+        }
 
         let titleCard = makeTitleCard(player: player, game: game)
         let lowerThird = LowerThirdSpec(
@@ -167,31 +198,38 @@ struct EditPlanBuilder {
         let log = Logger(subsystem: "com.playercut.app", category: "BeatSnap")
         log.info("beat-snap: bpm=\(bpm, format: .fixed(precision: 1)) beat=\(beatPeriod, format: .fixed(precision: 3))s snapUnit=\(snapUnit, format: .fixed(precision: 3))s")
 
-        return clips.map { clip in
+        // HARD FLOORS — a snapped clip may NEVER drop below these, at any
+        // tempo. Below them the composition becomes degenerate and export
+        // dies with -11841 "Operation Stopped" (seen at 140 BPM × 10 clips
+        // where snapUnit is tiny). If a snap would violate a floor we keep
+        // the clip UNSNAPPED rather than trim it to death.
+        let minRenderedSeconds = 0.6   // shortest rendered clip we'll allow
+        let minSourceSeconds = 0.5     // shortest source slice we'll allow
+
+        return clips.enumerated().map { (i, clip) in
             let segments = clip.speedCurve.segments
-            // k = sum((fracEnd - fracStart) / factor)
-            // rendered = sourceDur * k
+            // k = sum((fracEnd - fracStart) / factor); rendered = sourceDur * k
             let k = segments.reduce(0.0) { acc, s in
                 acc + (s.sourceFractionEnd - s.sourceFractionStart)
                     / max(0.01, s.factor)
             }
             guard k > 0 else { return clip }
             let currentRendered = clip.sourceDuration * k
-            let beats = max(2.0,
-                            (currentRendered / snapUnit).rounded())
+            let beats = max(2.0, (currentRendered / snapUnit).rounded())
             let targetRendered = beats * snapUnit
             let newSourceDur = targetRendered / k
-            guard newSourceDur >= 1.0 else {
-                log.warning("beat-snap: skipping clip (sourceDur \(newSourceDur, format: .fixed(precision: 2))s < 1.0s after snap)")
-                return clip
-            }
-            // Don't extend past the original sourceEnd — only trim.
-            guard newSourceDur <= clip.sourceDuration else {
+
+            // Floor checks — keep unsnapped if any would be violated. Log the
+            // exact values so a tempo regression is debuggable, never generic.
+            guard targetRendered >= minRenderedSeconds,
+                  newSourceDur >= minSourceSeconds,
+                  newSourceDur <= clip.sourceDuration else {
+                log.warning("beat-snap clip \(i): UNSNAPPED — would break floor (rendered \(currentRendered, format: .fixed(precision: 2))→\(targetRendered, format: .fixed(precision: 2))s, src \(clip.sourceDuration, format: .fixed(precision: 2))→\(newSourceDur, format: .fixed(precision: 2))s, snapUnit \(snapUnit, format: .fixed(precision: 3))s, bpm \(bpm, format: .fixed(precision: 0)))")
                 return clip
             }
             var snapped = clip
             snapped.sourceEnd = clip.sourceStart + newSourceDur
-            log.info("beat-snap: \(currentRendered, format: .fixed(precision: 2))s → \(targetRendered, format: .fixed(precision: 2))s (\(Int(beats)) beats)")
+            log.info("beat-snap clip \(i): \(currentRendered, format: .fixed(precision: 2))s → \(targetRendered, format: .fixed(precision: 2))s (\(Int(beats)) beats)")
             return snapped
         }
     }
@@ -260,31 +298,107 @@ struct EditPlanBuilder {
     // MARK: - Body clips
 
     private func buildBodyClip(from sel: SelectedClip,
-                               isLast: Bool) -> ClipPlan {
+                               isLast: Bool,
+                               tier: PacingTier = .feature) -> ClipPlan {
         let e = energy(of: sel)
-        let crop = buildCropKeyframes(boxes: sel.moment.playerBoundingBoxes,
-                                      sourceStart: sel.clipStart,
-                                      sourceEnd: sel.clipEnd,
-                                      tighter: false)
 
-        let allowsRamp = style.allowsSpeedRamps
-            && Float(e) >= profile.speedRampEnergyThreshold
-        let speed: SpeedCurve = allowsRamp
-            ? rampedSpeedCurve(apexFraction: anchorFraction(in: sel),
-                               deepestFactor: profile.apexSpeedFactor)
-            : SpeedCurve.realTime
+        // Section 2: tier durations + slow-mo gating + apex freeze.
+        // Hero-emphasis pacing re-centers each clip on its action anchor
+        // with a tier-specific span; slow-mo (and the 0.3 s freeze) are
+        // RESTRICTED to hero so feature/filler clips stay tight.
+        let (clipStart, clipEnd) = recenterForTier(sel: sel, tier: tier)
+
+        let crop = buildCropKeyframes(boxes: sel.moment.playerBoundingBoxes,
+                                      sourceStart: clipStart,
+                                      sourceEnd: clipEnd,
+                                      tighter: tier == .hero)
+
+        // Slow-mo gating: hero-only when heroPacing is ON; otherwise the
+        // pre-existing energy-based trigger drives it.
+        let allowsRamp: Bool
+        let speed: SpeedCurve
+        if settings.heroPacing {
+            allowsRamp = (tier == .hero) && style.allowsSpeedRamps
+            speed = allowsRamp
+                ? rampedSpeedCurve(apexFraction: anchorFraction(in: sel),
+                                   deepestFactor: settings.slowMoSpeed)
+                : .realTime
+        } else {
+            allowsRamp = style.allowsSpeedRamps
+                && Float(e) >= profile.speedRampEnergyThreshold
+            speed = allowsRamp
+                ? rampedSpeedCurve(apexFraction: anchorFraction(in: sel),
+                                   deepestFactor: profile.apexSpeedFactor)
+                : .realTime
+        }
+        let freeze: Double = (settings.heroPacing && tier == .hero) ? 0.3 : 0
 
         let transition: TransitionKind = isLast
             ? .crossDissolve
             : pickTransition(for: Float(e))
 
         return ClipPlan(id: sel.moment.id,
-                        sourceStart: sel.clipStart,
-                        sourceEnd: sel.clipEnd,
+                        sourceStart: clipStart,
+                        sourceEnd: clipEnd,
                         cropKeyframes: crop,
                         speedCurve: speed,
                         outgoingTransition: transition,
-                        energy: Float(e))
+                        energy: Float(e),
+                        pacingTier: tier,
+                        freezeFrameSeconds: freeze)
+    }
+
+    // MARK: - Pacing tiers (Section 2)
+
+    /// Sorts body moments by composite score; the top `numHero` get
+    /// `.hero`, the next ~30 % `.feature`, the rest `.filler`.
+    private func assignTiers(to moments: [SelectedClip],
+                             numHero: Int) -> [UUID: PacingTier] {
+        guard !moments.isEmpty else { return [:] }
+        let sorted = moments.sorted {
+            $0.moment.compositeScore > $1.moment.compositeScore
+        }
+        var out: [UUID: PacingTier] = [:]
+        let heroCount = max(1, min(numHero, sorted.count))
+        let featureEnd = heroCount + max(1, Int((Double(sorted.count - heroCount) * 0.3).rounded()))
+        for (i, sel) in sorted.enumerated() {
+            if i < heroCount {
+                out[sel.moment.id] = .hero
+            } else if i < featureEnd {
+                out[sel.moment.id] = .feature
+            } else {
+                out[sel.moment.id] = .filler
+            }
+        }
+        return out
+    }
+
+    /// Tier-driven source span centered on the moment's action anchor.
+    /// Hero gets `settings.heroDurationSec` (long hold), feature ~3.5 s,
+    /// filler `settings.fillerDurationSec` (tight). When heroPacing is
+    /// OFF we leave the ranker's choice untouched.
+    private func recenterForTier(sel: SelectedClip,
+                                 tier: PacingTier) -> (Double, Double) {
+        guard settings.heroPacing else {
+            return (sel.clipStart, sel.clipEnd)
+        }
+        let target: Double
+        switch tier {
+        case .hero:    target = settings.heroDurationSec
+        case .feature: target = 3.5
+        case .filler:  target = settings.fillerDurationSec
+        }
+        let center = anchorTime(in: sel.moment) ?? sel.center
+        var start = center - target / 2
+        var end = center + target / 2
+        // Clamp inside the moment's available range so we don't read past
+        // where the ranker said the action actually lived.
+        let lo = sel.clipStart, hi = sel.clipEnd
+        if start < lo { end += (lo - start); start = lo }
+        if end > hi { start -= (end - hi); end = hi }
+        start = max(0, start)
+        end = min(sourceDuration, end)
+        return (start, max(start + 0.5, end))   // never drop below 0.5 s
     }
 
     // MARK: - Auto-reframe (Part 3A)

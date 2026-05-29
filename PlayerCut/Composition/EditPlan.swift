@@ -148,6 +148,18 @@ struct OutputSpec {
     var preferHEVC: Bool = true
 }
 
+/// Pacing tier (Section 2). The ranker doesn't know tiers — they're
+/// assigned by EditPlanBuilder based on score percentile so the top
+/// play gets the long hold + slow-mo + apex freeze, the rest stay tight.
+enum PacingTier: String, Codable {
+    /// Top 1-2 plays. Long hold (~4-6s), slow-mo at apex, 0.3s freeze.
+    case hero
+    /// Next ~30%. Standard (~3-4s, normal speed).
+    case feature
+    /// Remaining body. Tight hard cuts on the beat (~2-3s).
+    case filler
+}
+
 /// One renderable segment of source video, with all decisions baked in.
 struct ClipPlan: Identifiable {
     let id: UUID
@@ -166,14 +178,22 @@ struct ClipPlan: Identifiable {
     /// 0..1 energy score (derived from composite + audio + action).
     /// Drives transition choice and ramp aggression.
     var energy: Float
+    /// Section 2 pacing tier. Defaults to .feature (no special handling).
+    var pacingTier: PacingTier = .feature
+    /// Extra rendered seconds tacked on by holding the last frame —
+    /// hero "apex freeze." 0 = no freeze. ReelComposer.insertClip honors
+    /// it by inserting one last source frame scaled to this duration.
+    var freezeFrameSeconds: Double = 0
 
     /// Source duration before any speed mapping.
     var sourceDuration: Double { sourceEnd - sourceStart }
 
-    /// Rendered (output) duration after the speed curve has been
-    /// applied. Speed factor < 1.0 stretches time → longer rendered.
+    /// Rendered (output) duration after the speed curve has been applied
+    /// AND the apex freeze (if any). Speed factor < 1.0 stretches time;
+    /// freeze adds a held final frame on top.
     var renderedDuration: Double {
         speedCurve.renderedDuration(forSource: sourceDuration)
+            + freezeFrameSeconds
     }
 }
 
