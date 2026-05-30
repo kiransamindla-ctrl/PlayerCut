@@ -1,0 +1,124 @@
+{
+  "identifier" : "playercut.storekit",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "79.00",
+      "familyShareable" : false,
+      "internalID" : "PCLifetime",
+      "localizations" : [
+        {
+          "description" : "One-time purchase. 1 player, no future bill.",
+          "displayName" : "Lifetime",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.playercut.app.lifetime",
+      "referenceName" : "Lifetime",
+      "type" : "NonConsumable"
+    }
+  ],
+  "settings" : {
+    "_compatibilityTimeRate" : 1,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : []
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "PCSubGroup",
+      "localizations" : [],
+      "name" : "PlayerCut Subscriptions",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "5.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "PCSingleMonth",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "1 player · monthly · cancel anytime",
+              "displayName" : "Single — Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.playercut.app.single.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Single Monthly",
+          "subscriptionGroupID" : "PCSubGroup",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "9.99",
+          "familyShareable" : true,
+          "groupNumber" : 2,
+          "internalID" : "PCFamilyMonth",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Up to 3 players · monthly",
+              "displayName" : "Family — Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.playercut.app.family.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Family Monthly",
+          "subscriptionGroupID" : "PCSubGroup",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "29.00",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "PCSingleAnnual",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "1 player · annual · best value",
+              "displayName" : "Single — Annual",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.playercut.app.single.annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Single Annual",
+          "subscriptionGroupID" : "PCSubGroup",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "49.00",
+          "familyShareable" : true,
+          "groupNumber" : 4,
+          "internalID" : "PCFamilyAnnual",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Up to 3 players · annual",
+              "displayName" : "Family — Annual",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.playercut.app.family.annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Family Annual",
+          "subscriptionGroupID" : "PCSubGroup",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

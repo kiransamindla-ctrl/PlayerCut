@@ -33,6 +33,36 @@ enum ReelSettingsKeys {
 
     // Section 3 — order
     static let hookFirst         = "playercut.reel.hookFirst"          // Bool
+
+    // CapCut-parity S1 — Background removal
+    static let backgroundMode    = "playercut.reel.backgroundMode"     // String enum (BackgroundMode)
+    static let forceSegAllClips  = "playercut.debug.forceSegAllClips"  // Bool
+    static let showSegMask       = "playercut.debug.showSegMask"       // Bool
+
+    // CapCut-parity S2 — Auto-captions
+    static let captionsEnabled   = "playercut.reel.captionsEnabled"    // Bool
+    static let captionLocale     = "playercut.debug.captionLocale"     // String (e.g. "auto", "en-US")
+    static let captionPosition   = "playercut.debug.captionPosition"   // String enum (CaptionPosition)
+
+    // CapCut-parity S5 — Stage 1 debug
+    static let forceSceneType    = "playercut.debug.forceSceneType"    // String enum (SceneOverride)
+    static let usePoseSignal     = "playercut.debug.usePoseSignal"     // Bool
+}
+
+/// Background-removal modes for the MetalPetal segmentation pass.
+enum BackgroundMode: String, CaseIterable, Codable {
+    case off    // no segmentation
+    case cutout // person over blurred-background plate
+    case pop    // graded person over mildly-graded background
+    case auto   // engine picks per clip (cutout on hero, pop on feature, off on filler)
+}
+
+enum CaptionPosition: String, CaseIterable, Codable {
+    case bottom, middle, top
+}
+
+enum SceneOverride: String, CaseIterable, Codable {
+    case auto, indoor, outdoor, stadium
 }
 
 /// Snapshot of every reel-tuning knob, read fresh per compose so the
@@ -60,19 +90,41 @@ struct ReelSettings: Equatable {
     // MARK: - 3. Order
     var hookFirst: Bool
 
-    // MARK: - Defaults that match the prompt's "best reel" recommendation
+    // MARK: - CapCut-parity S1 — Background removal
+    var backgroundMode: BackgroundMode
+    var forceSegAllClips: Bool   // debug
+    var showSegMask: Bool        // debug
+
+    // MARK: - CapCut-parity S2 — Auto-captions
+    var captionsEnabled: Bool
+    var captionLocale: String    // "auto" or a BCP-47 like "en-US"
+    var captionPosition: CaptionPosition
+
+    // MARK: - CapCut-parity S5 — Stage 1
+    var forceSceneType: SceneOverride
+    var usePoseSignal: Bool
+
+    // MARK: - Defaults — Default-ON-for-quality-wins per project rules
     static let defaults = ReelSettings(
         includeGameAudio:  true,
-        musicLevelDb:      -4.5,    // mid of -6…-3
-        gameAudioLevelDb:  -21,     // mid of -24…-18
+        musicLevelDb:      -4.5,
+        gameAudioLevelDb:  -21,
         duckDepthDb:        6,
-        gameAudioBoostDb:   5,      // mid of 3-6
+        gameAudioBoostDb:   5,
         heroPacing:         true,
-        heroDurationSec:    5.0,    // mid of 4-6
-        fillerDurationSec:  2.5,    // mid of 2-3
-        slowMoSpeed:        0.4,    // prompt: 0.4x at apex
+        heroDurationSec:    5.0,
+        fillerDurationSec:  2.5,
+        slowMoSpeed:        0.4,
         numHeroClips:       1,
-        hookFirst:          true)
+        hookFirst:          true,
+        backgroundMode:     .off,           // perf-conservative default; user opts in via Settings → Effects
+        forceSegAllClips:   false,
+        showSegMask:        false,
+        captionsEnabled:    true,           // default-ON for quality win
+        captionLocale:      "auto",
+        captionPosition:    .bottom,
+        forceSceneType:     .auto,
+        usePoseSignal:      true)
 
     /// Fresh read from UserDefaults. Each compose() picks up the user's
     /// latest A/B settings without needing a relaunch.
@@ -101,7 +153,26 @@ struct ReelSettings: Equatable {
             numHeroClips:
                 d.object(forKey: ReelSettingsKeys.numHeroClips)      as? Int    ?? base.numHeroClips,
             hookFirst:
-                d.object(forKey: ReelSettingsKeys.hookFirst)         as? Bool   ?? base.hookFirst)
+                d.object(forKey: ReelSettingsKeys.hookFirst)         as? Bool   ?? base.hookFirst,
+            backgroundMode:
+                BackgroundMode(rawValue: d.string(forKey: ReelSettingsKeys.backgroundMode) ?? "")
+                    ?? base.backgroundMode,
+            forceSegAllClips:
+                d.object(forKey: ReelSettingsKeys.forceSegAllClips)  as? Bool   ?? base.forceSegAllClips,
+            showSegMask:
+                d.object(forKey: ReelSettingsKeys.showSegMask)       as? Bool   ?? base.showSegMask,
+            captionsEnabled:
+                d.object(forKey: ReelSettingsKeys.captionsEnabled)   as? Bool   ?? base.captionsEnabled,
+            captionLocale:
+                d.string(forKey: ReelSettingsKeys.captionLocale)            ?? base.captionLocale,
+            captionPosition:
+                CaptionPosition(rawValue: d.string(forKey: ReelSettingsKeys.captionPosition) ?? "")
+                    ?? base.captionPosition,
+            forceSceneType:
+                SceneOverride(rawValue: d.string(forKey: ReelSettingsKeys.forceSceneType) ?? "")
+                    ?? base.forceSceneType,
+            usePoseSignal:
+                d.object(forKey: ReelSettingsKeys.usePoseSignal)     as? Bool   ?? base.usePoseSignal)
     }
 
     /// dB → linear gain helper used by both the audio mix and the tests.

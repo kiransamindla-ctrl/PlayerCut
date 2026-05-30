@@ -146,7 +146,10 @@ actor Stage1CoarseDetector {
                               audioSigma: Float,
                               flowSigma: Float) async throws
         -> ([CandidateWindow], [CandidateWindow]) {
-        async let audio = detectAudioPeaks(loudnessURL: loudnessURL,
+        // Source-audio decode replaces the empty-sidecar code path in
+        // production (system-camera capture writes []). The loudnessURL
+        // is kept on the GameSession for back-compat but no longer read.
+        async let audio = detectAudioPeaks(videoURL: videoURL,
                                            sigma: audioSigma)
         async let motion = detectMotionPeaks(videoURL: videoURL,
                                              sigma: flowSigma)
@@ -155,15 +158,90 @@ actor Stage1CoarseDetector {
         return (a, m)
     }
 
+    /// Decode the source video's audio track to a [LoudnessSample]-shaped
+    /// envelope via AVAssetReader (16 kHz mono PCM, RMS over 50 ms hops).
+    /// Same routine as `AudioPeakDetector`, lifted into Stage 1 because
+    /// CaptureView writes an empty sidecar on system-camera ingest.
+    private func loudnessSamplesFromSource(videoURL: URL) async -> [LoudnessSample] {
+        let asset = AVURLAsset(url: videoURL)
+        guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
+              let reader = try? AVAssetReader(asset: asset) else {
+            return []
+        }
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsNonInterleaved: false,
+            AVSampleRateKey: 16_000,
+            AVNumberOfChannelsKey: 1
+        ]
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: settings)
+        guard reader.canAdd(output) else { return [] }
+        reader.add(output)
+        guard reader.startReading() else { return [] }
+
+        let sampleRate: Double = 16_000
+        let hopSeconds: Double = 0.05
+        let hopFrames = max(1, Int(hopSeconds * sampleRate))
+        var envelope: [LoudnessSample] = []
+        var elapsedSamples: Int64 = 0
+        // Track peak amplitude so we can normalize → [0, 1] like the
+        // sidecar format expected (rms in [0, 1]).
+        var maxRMS: Float = 0
+        var rawWindow: [Float] = []
+
+        while let sb = output.copyNextSampleBuffer() {
+            defer { CMSampleBufferInvalidate(sb) }
+            guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
+            var length = 0
+            var ptr: UnsafeMutablePointer<Int8>?
+            guard CMBlockBufferGetDataPointer(bb, atOffset: 0,
+                                              lengthAtOffsetOut: nil,
+                                              totalLengthOut: &length,
+                                              dataPointerOut: &ptr) == kCMBlockBufferNoErr,
+                  let raw = ptr, length >= 2 else { continue }
+            let nSamples = length / 2
+            let samples = raw.withMemoryRebound(to: Int16.self, capacity: nSamples) { p in
+                Array(UnsafeBufferPointer(start: p, count: nSamples))
+            }
+            var i = 0
+            while i + hopFrames <= samples.count {
+                var sumSq: Double = 0
+                for j in i..<(i + hopFrames) {
+                    let v = Double(samples[j]); sumSq += v * v
+                }
+                let rms = Float(sqrt(sumSq / Double(hopFrames)) / 32768.0)
+                if rms > maxRMS { maxRMS = rms }
+                rawWindow.append(rms)
+                envelope.append(LoudnessSample(
+                    t: Double(elapsedSamples + Int64(i)) / sampleRate,
+                    rms: rms))
+                i += hopFrames
+            }
+            elapsedSamples += Int64(samples.count)
+        }
+        // Normalize so the peak-clustering's mean+sigma logic sees values
+        // in the same shape as the historical sidecar format.
+        if maxRMS > 0 {
+            envelope = envelope.map { LoudnessSample(t: $0.t, rms: $0.rms / maxRMS) }
+        }
+        return envelope
+    }
+
     // MARK: - Audio
 
-    private func detectAudioPeaks(loudnessURL: URL,
+    /// CapCut-parity S5 — lift the AudioPeakDetector pattern (AVAssetReader
+    /// RMS-envelope) into Stage 1. The system-camera capture writes an
+    /// empty loudness sidecar, so without this Stage 1 had ZERO audio
+    /// candidates in production. Decode the source video's audio track
+    /// directly into a [LoudnessSample]-shaped envelope and feed the same
+    /// peak-clustering downstream.
+    private func detectAudioPeaks(videoURL: URL,
                                   sigma: Float) async throws -> [CandidateWindow] {
-        log.info("Stage 1 audio: reading loudness file")
-        let data = try Data(contentsOf: loudnessURL)
-        let samples = try JSONDecoder().decode([LoudnessSample].self,
-                                               from: data)
-        log.info("Stage 1 audio: \(samples.count) loudness samples")
+        let samples = await loudnessSamplesFromSource(videoURL: videoURL)
+        log.info("Stage 1 audio (source decode): \(samples.count) envelope samples")
         guard samples.count > 20 else { return [] }
 
         let sampleRateHz = Double(samples.count) /
