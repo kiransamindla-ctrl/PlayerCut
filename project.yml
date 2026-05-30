@@ -38,6 +38,7 @@ targets:
         NSMicrophoneUsageDescription: PlayerCut uses the microphone to find the most exciting moments and add game sound to your reel.
         NSPhotoLibraryAddUsageDescription: PlayerCut saves your finished reel to your Photos. We only add — we never read your library.
         NSBluetoothAlwaysUsageDescription: PlayerCut uses Bluetooth to detect your child's beacon for instant, reliable identification. We never connect to or read other devices.
+        NSSpeechRecognitionUsageDescription: PlayerCut transcribes the game's audio on your phone to add captions to your reel. Speech recognition runs on-device and never leaves your phone.
         UIBackgroundModes:
           - processing
           - fetch

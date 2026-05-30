@@ -45,6 +45,17 @@ final class AppCoordinator: ObservableObject {
         let center = UNUserNotificationCenter.current()
         _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
 
+        // CapCut-parity S3 — wire StoreKit 2 on every launch:
+        // 1. Load the 5 paid products from the App Store (or
+        //    Configuration.storekit in the sim).
+        // 2. Reconcile PricingGate.plan with whatever Apple says the user
+        //    actually owns (handles "bought on another device").
+        // 3. Start listening for renewals / refunds / family-share events
+        //    so a subscription change lands without an app relaunch.
+        await StoreKitManager.shared.loadProducts()
+        await StoreKitManager.shared.refreshEntitlements()
+        StoreKitManager.shared.startListening()
+
         #if DEBUG
         // UI-test seam: seed a player so the populated home (Record game →
         // pre-record sheet) is reachable on the simulator, where the
@@ -91,6 +102,9 @@ struct RootView: View {
     @State private var presentingPreRecord = false
     @State private var preRecordChoice: PreRecordChoice?
     @State private var presentingCapture = false
+    @State private var presentingPHPicker = false
+    @State private var presentingNoEnrollmentAlert = false
+    @State private var pickedVideoURL: URL?
     @State private var presentingSettings = false
     @State private var presentingCompilation = false
     @State private var presentingAssistedTier = false
@@ -193,6 +207,28 @@ struct RootView: View {
                     permissionsPrimerDone = true
                 }
                 .preferredColorScheme(.dark)
+            }
+            .sheet(isPresented: $presentingPHPicker) {
+                PHVideoPicker { url in
+                    presentingPHPicker = false
+                    guard let url else { return }
+                    pickedVideoURL = url
+                    if coordinator.players.isEmpty {
+                        // No-enrollment path: confirm Tier-3 montage mode.
+                        presentingNoEnrollmentAlert = true
+                    } else {
+                        ingestPickedVideoAsCurrentPlayer()
+                    }
+                }
+            }
+            .alert("No player enrolled",
+                   isPresented: $presentingNoEnrollmentAlert) {
+                Button("Continue as Highlights") {
+                    Task { await ingestPickedVideoAsAnonymous() }
+                }
+                Button("Cancel", role: .cancel) { pickedVideoURL = nil }
+            } message: {
+                Text("The reel will be a montage without follow-the-subject. Enroll a player first for tracking.")
             }
             .sheet(isPresented: $presentingPaywall) {
                 PaywallView(
@@ -404,6 +440,14 @@ struct RootView: View {
                 presentingPreRecord = true
             }
             .accessibilityIdentifier("record-game")
+            // CapCut-parity S4 — One-tap Instant Reel from existing video.
+            PCOutlinePillButton(title: "Reel from video",
+                                systemImage: "photo.on.rectangle.angled",
+                                color: Theme.accent,
+                                height: 56) {
+                presentingPHPicker = true
+            }
+            .accessibilityIdentifier("reel-from-video")
             PCOutlinePillButton(title: "Compilation",
                                 systemImage: "sparkles",
                                 color: eligibleCompilationGames.count < 2
@@ -416,6 +460,62 @@ struct RootView: View {
             .disabled(eligibleCompilationGames.count < 2)
             .opacity(eligibleCompilationGames.count < 2 ? 0.5 : 1.0)
         }
+    }
+
+    // MARK: - Reel-from-video ingestion (CapCut-parity S4)
+
+    /// Enqueue the picked video as a game tied to the most-recently-used
+    /// enrolled player. Same shape as CaptureView's system-camera ingest.
+    private func ingestPickedVideoAsCurrentPlayer() {
+        guard let url = pickedVideoURL,
+              let player = coordinator.players.first else { return }
+        pickedVideoURL = nil
+        Task {
+            await ingest(url: url, player: player)
+        }
+    }
+
+    /// No-enrollment path: synthesizes a placeholder "Highlights" player
+    /// (empty HSV/face), persists it, then enqueues the picked video.
+    /// Stage 2 finds no identity match → ranker Tier 3 montage → reel
+    /// still exports, just without follow-the-subject framing.
+    private func ingestPickedVideoAsAnonymous() async {
+        guard let url = pickedVideoURL else { return }
+        pickedVideoURL = nil
+        let anon = PlayerEnrollment(
+            id: UUID(), name: "Highlights", jerseyNumber: "0",
+            jerseyColorHSV: HSVHistogram(bins: [Float](repeating: 0, count: 256)),
+            faceEmbedding: [Float](repeating: 0, count: 128),
+            sport: .soccer, createdAt: Date())
+        try? await coordinator.store.upsert(anon)
+        await coordinator.refresh()
+        await ingest(url: url, player: anon)
+    }
+
+    private func ingest(url: URL, player: PlayerEnrollment) async {
+        let id = UUID()
+        let dir = StoragePaths.tempGameDirectory(for: id)
+        try? FileManager.default.createDirectory(at: dir,
+                                                 withIntermediateDirectories: true)
+        let workingURL = StoragePaths.tempRawVideoURL(for: id)
+        let loudnessURL = StoragePaths.tempAudioLoudnessURL(for: id)
+        try? FileManager.default.copyItem(at: url, to: workingURL)
+        if let empty = try? JSONEncoder().encode([LoudnessSample]()) {
+            try? empty.write(to: loudnessURL, options: .atomic)
+        }
+        let game = GameSession(
+            id: id, playerId: player.id, sport: player.sport,
+            startedAt: Date(), endedAt: Date(),
+            rawVideoURL: workingURL, audioLoudnessURL: loudnessURL,
+            stage1Result: nil, stage2Result: nil,
+            exportedReelAssetId: nil, localReelFallbackURL: nil,
+            status: .awaitingProcessing,
+            triggerSource: .manual,
+            reelLengthOverride: player.reelLengthPreference,
+            sceneType: .outdoor,
+            musicVibeOverride: player.musicVibe,
+            captureRecipe: nil)
+        await coordinator.didFinishRecording(game: game)
     }
 
     private var eligibleCompilationGames: [GameSession] {

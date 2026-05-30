@@ -13,6 +13,10 @@ struct PaywallView: View {
     var onSubscribe: (PricingPlan) -> Void
     var onMaybeLater: () -> Void
 
+    @StateObject private var store = StoreKitManager.shared
+    @State private var purchasingPlan: PricingPlan?
+    @State private var errorBanner: String?
+
     private let plans: [PricingPlan] = [
         .singleMonthly,
         .familyMonthly,
@@ -28,9 +32,42 @@ struct PaywallView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     header
 
+                    if let err = errorBanner {
+                        Text(err)
+                            .font(.pcCaption)
+                            .foregroundStyle(Theme.danger)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Theme.bgCard,
+                                        in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+                            .accessibilityIdentifier("paywall-error")
+                    }
+
                     ForEach(plans, id: \.self) { plan in
                         planCard(plan)
                     }
+
+                    Button {
+                        Haptic.tap()
+                        Task {
+                            errorBanner = nil
+                            let result = await store.restorePurchases()
+                            if case .failure(let err) = result {
+                                errorBanner = err.localizedDescription
+                            } else {
+                                onSubscribe(PricingGate.currentPlan)
+                            }
+                        }
+                    } label: {
+                        Text("RESTORE PURCHASES")
+                            .font(.system(size: 14, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundStyle(Theme.accent)
+                            .padding(.vertical, 14)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("paywall-restore")
 
                     Button {
                         Haptic.tap()
@@ -67,9 +104,23 @@ struct PaywallView: View {
         let isHighlight = (plan == .singleAnnual)
         return Button {
             Haptic.success()
-            // TODO StoreKit2-LAUNCH: replace with real Product purchase
-            PricingGate.setPlan(plan)
-            onSubscribe(plan)
+            errorBanner = nil
+            purchasingPlan = plan
+            Task {
+                if store.products.isEmpty { await store.loadProducts() }
+                let result = await store.purchase(plan)
+                purchasingPlan = nil
+                switch result {
+                case .success(let purchased):
+                    onSubscribe(purchased)
+                case .failure(let err):
+                    if case StoreKitManager.StoreKitError.userCancelled = err {
+                        // Silent — user backed out, no banner.
+                    } else {
+                        errorBanner = err.localizedDescription
+                    }
+                }
+            }
         } label: {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {

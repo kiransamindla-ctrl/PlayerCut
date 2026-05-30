@@ -37,6 +37,17 @@ struct SettingsView: View {
     @AppStorage(ReelSettingsKeys.slowMoSpeed)       private var slowMoSpeed: Double = 0.4
     // Section 3 — Reel Order
     @AppStorage(ReelSettingsKeys.hookFirst) private var hookFirst = true
+    // CapCut-parity S1 — Background
+    @AppStorage(ReelSettingsKeys.backgroundMode)   private var backgroundModeRaw = BackgroundMode.auto.rawValue
+    @AppStorage(ReelSettingsKeys.forceSegAllClips) private var forceSegAllClips = false
+    @AppStorage(ReelSettingsKeys.showSegMask)      private var showSegMask = false
+    // CapCut-parity S2 — Captions
+    @AppStorage(ReelSettingsKeys.captionsEnabled)  private var captionsEnabled = true
+    @AppStorage(ReelSettingsKeys.captionLocale)    private var captionLocale = "auto"
+    @AppStorage(ReelSettingsKeys.captionPosition)  private var captionPositionRaw = CaptionPosition.bottom.rawValue
+    // CapCut-parity S5 — Stage 1 debug
+    @AppStorage(ReelSettingsKeys.forceSceneType)   private var forceSceneTypeRaw = SceneOverride.auto.rawValue
+    @AppStorage(ReelSettingsKeys.usePoseSignal)    private var usePoseSignal = true
 
     var body: some View {
         NavigationStack {
@@ -143,6 +154,105 @@ struct SettingsView: View {
                             .font(.pcCaption)
                             .foregroundStyle(Theme.textSecondary)
                             .padding(.horizontal, 4)
+
+                        // CapCut-parity S1 — Effects (background segmentation)
+                        sectionHeader("Effects")
+                        reelCard {
+                            Picker("Background style",
+                                   selection: $backgroundModeRaw) {
+                                ForEach(BackgroundMode.allCases, id: \.rawValue) { m in
+                                    Text(m.rawValue.capitalized).tag(m.rawValue)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("reel-bg-mode")
+                            Toggle("Force segmentation on every clip (debug)",
+                                   isOn: $forceSegAllClips)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-bg-force-all")
+                            Toggle("Show segmentation mask (debug)",
+                                   isOn: $showSegMask)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-bg-show-mask")
+                        }
+                        Text("Cutout puts the kid over a blurred plate. Pop pushes the grade only on the kid. Auto picks per clip.")
+                            .font(.pcCaption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
+
+                        // CapCut-parity S2 — Captions
+                        sectionHeader("Captions")
+                        reelCard {
+                            Toggle("Auto captions", isOn: $captionsEnabled)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-captions-enabled")
+                            Picker("Position", selection: $captionPositionRaw) {
+                                ForEach(CaptionPosition.allCases, id: \.rawValue) { p in
+                                    Text(p.rawValue.capitalized).tag(p.rawValue)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityIdentifier("reel-caption-position")
+                            HStack {
+                                Text("Locale").font(.pcBody)
+                                    .foregroundStyle(Theme.textPrimary)
+                                Spacer()
+                                TextField("auto", text: $captionLocale)
+                                    .multilineTextAlignment(.trailing)
+                                    .autocorrectionDisabled()
+                                    .accessibilityIdentifier("reel-caption-locale")
+                            }
+                        }
+                        Text("On-device speech recognition. \"auto\" uses the device locale; \"en-US\" / \"es-ES\" etc. force one.")
+                            .font(.pcCaption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
+
+                        // CapCut-parity S3 — Subscription
+                        sectionHeader("Subscription")
+                        reelCard {
+                            HStack {
+                                Text("Current plan").font(.pcBody)
+                                    .foregroundStyle(Theme.textPrimary)
+                                Spacer()
+                                Text(PricingGate.currentPlan.displayName)
+                                    .font(.pcCaption)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            Button("Restore Purchases") {
+                                Task { _ = await StoreKitManager.shared.restorePurchases() }
+                            }
+                            .accessibilityIdentifier("subscription-restore")
+                            #if DEBUG
+                            Button("Reset free-trial counter (debug)") {
+                                PricingGate.resetFreeTrial()
+                            }
+                            .accessibilityIdentifier("subscription-reset-trial")
+                            Picker("Force plan (debug)", selection: Binding(
+                                get: { PricingGate.currentPlan.rawValue },
+                                set: { PricingGate.setPlan(PricingPlan(rawValue: $0) ?? .freeTrial) })) {
+                                ForEach(PricingPlan.allCases, id: \.rawValue) { p in
+                                    Text(p.displayName).tag(p.rawValue)
+                                }
+                            }
+                            .accessibilityIdentifier("subscription-force-plan")
+                            #endif
+                        }
+
+                        // CapCut-parity S5 — Stage 1 debug
+                        sectionHeader("Stage 1 debug")
+                        reelCard {
+                            Picker("Force scene type", selection: $forceSceneTypeRaw) {
+                                ForEach(SceneOverride.allCases, id: \.rawValue) { s in
+                                    Text(s.rawValue.capitalized).tag(s.rawValue)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("stage1-force-scene")
+                            Toggle("Use pose signal", isOn: $usePoseSignal)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("stage1-use-pose")
+                        }
 
                         Text("PlayerCut never stores your child's video. Reels live in your Photos. Raw recordings are deleted the moment the reel is made.")
                             .font(.pcCaption)

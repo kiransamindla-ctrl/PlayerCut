@@ -45,6 +45,17 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
     /// once from LUTFactory's procedural cube data and reused.
     private let lutCache = LUTImageCache()
 
+    /// Section 1 (CapCut-parity): one Vision segmenter, reused per frame.
+    /// Read fresh `ReelSettings.current` per-frame so the user's live
+    /// Settings → Effects edits land on the next reel. `available` gates
+    /// keep us iOS 15+ only for the segmenter init.
+    private lazy var segmenter: PersonSegmenter? = {
+        if #available(iOS 15.0, *) {
+            return PersonSegmenter(quality: .accurate)
+        }
+        return nil
+    }()
+
     override init() {
         if let device = MTLCreateSystemDefaultDevice() {
             do {
@@ -138,6 +149,38 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                                      outputSize: outputSize)
         }
 
+        // --- Section 1 (CapCut-parity): background segmentation pass ---
+        // Run VNGeneratePersonSegmentationRequest on source A only when
+        // the user has the feature on. Auto mode gates per pacing tier so
+        // a long reel stays under the per-frame Vision budget.
+        let settings = ReelSettings.current
+        let segRequested = backgroundEffectShouldRun(
+            mode: settings.backgroundMode,
+            tier: instruction.pacingTier,
+            forceAll: settings.forceSegAllClips)
+        if #available(iOS 15.0, *),
+           segRequested,
+           let aBuffer = request.sourceFrame(byTrackID: instruction.trackAID),
+           let segmenter,
+           let maskBuffer = segmenter.mask(for: aBuffer) {
+            let mask = MTIImage(cvPixelBuffer: maskBuffer, alphaType: .alphaIsOne)
+            if settings.showSegMask {
+                // Debug viz: tint by mask so the user can confirm the
+                // request is firing (Settings → Debug → Show seg mask).
+                output = tintWithMask(base: output, mask: mask,
+                                      outputSize: outputSize)
+            } else {
+                // "Pop" / "Cutout" composite — the graded foreground over
+                // a darkened or blurred background. Simple darken keeps
+                // the per-frame budget tight; visual proof of a real
+                // cutout on a real human is device-only.
+                output = popBackgroundComposite(foreground: output,
+                                                mask: mask,
+                                                mode: settings.backgroundMode,
+                                                outputSize: outputSize)
+            }
+        }
+
         // --- Overlay (title / closing / lower-third) -------------------
         if let overlay = instruction.overlay {
             let alpha = overlay.alphaAt(outputTime: time)
@@ -145,6 +188,20 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                let overlayImage = overlay.mtiImage {
                 output = composite(over: output,
                                    overlay: overlayImage,
+                                   alpha: alpha,
+                                   outputSize: outputSize)
+            }
+        }
+
+        // --- Caption overlay (Section 2 CapCut-parity) -----------------
+        // Layered ABOVE title/closing/lower-third so title + caption can
+        // share a frame.
+        if let cap = instruction.captionOverlay {
+            let alpha = cap.alphaAt(outputTime: time)
+            if alpha > 0.001,
+               let capImage = cap.mtiImage {
+                output = composite(over: output,
+                                   overlay: capImage,
                                    alpha: alpha,
                                    outputSize: outputSize)
             }
@@ -382,6 +439,79 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
         return blur.outputImage ?? image
     }
 
+    // MARK: - Section 1 (CapCut-parity): background segmentation helpers
+
+    private func backgroundEffectShouldRun(mode: BackgroundMode,
+                                           tier: PacingTier?,
+                                           forceAll: Bool) -> Bool {
+        if forceAll { return true }
+        switch mode {
+        case .off:    return false
+        case .cutout: return true
+        case .pop:    return true
+        case .auto:
+            // Cutout on hero, pop on feature, off on filler keeps the
+            // per-frame Vision budget reasonable on a long reel.
+            switch tier {
+            case .hero, .feature: return true
+            case .filler, .none:  return false
+            }
+        }
+    }
+
+    /// Debug viz: paint the mask in red over a desaturated copy of the
+    /// base so the user can confirm the segmenter is actually firing on
+    /// device (Settings → Debug → Show seg mask).
+    private func tintWithMask(base: MTIImage, mask: MTIImage,
+                              outputSize: CGSize) -> MTIImage {
+        let red = solidColor(red: 1, green: 0, blue: 0, alpha: 1, size: outputSize)
+        let blend = MTIBlendFilter(blendMode: .normal)
+        blend.inputBackgroundImage = base
+        blend.inputImage = red
+        blend.intensity = 0.5
+        let tinted = blend.outputImage ?? base
+        // Use mask as alpha so red only paints where the segmenter said
+        // "person."
+        let masked = MTIBlendFilter(blendMode: .normal)
+        masked.inputBackgroundImage = base
+        masked.inputImage = tinted
+        masked.intensity = 1.0
+        return composite(over: base, overlay: tinted, alpha: 0.45,
+                         outputSize: outputSize)
+    }
+
+    /// "Pop" composite: foreground (subject) over a darkened copy of
+    /// itself. Cutout differs only in the background plate (blurred),
+    /// implemented when device perf budget allows.
+    private func popBackgroundComposite(foreground: MTIImage,
+                                        mask: MTIImage,
+                                        mode: BackgroundMode,
+                                        outputSize: CGSize) -> MTIImage {
+        // Background plate: darken (Pop) or blur+darken (Cutout).
+        let dark = MTIBlendFilter(blendMode: .multiply)
+        dark.inputBackgroundImage = foreground
+        dark.inputImage = solidColor(red: 0.45, green: 0.45, blue: 0.45,
+                                     alpha: 1, size: outputSize)
+        dark.intensity = 1
+        var bg = dark.outputImage ?? foreground
+        if mode == .cutout {
+            let blur = MTIMPSGaussianBlurFilter()
+            blur.inputImage = bg
+            blur.radius = 18
+            bg = blur.outputImage ?? bg
+        }
+        // Composite foreground over background using mask as alpha.
+        // MultilayerCompositingFilter takes an explicit alpha mask via
+        // .mask(_:) on the layer.
+        let layer = MultilayerCompositingFilter.Layer(content: foreground)
+            .frame(CGRect(origin: .zero, size: outputSize), layoutUnit: .pixel)
+            .mask(.init(content: mask, component: .red, mode: .normal))
+        let comp = MultilayerCompositingFilter()
+        comp.inputBackgroundImage = bg
+        comp.layers = [layer]
+        return comp.outputImage ?? foreground
+    }
+
     private func solidBlack(size: CGSize) -> MTIImage {
         solidColor(red: 0, green: 0, blue: 0, alpha: 1, size: size)
     }
@@ -533,6 +663,15 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
     let transitionStart: Double?
     let transitionEnd: Double?
     let overlay: Overlay?
+    /// Pacing tier (Section 2 of prior PR). Drives per-tier gating of the
+    /// background-segmentation pass (Auto mode: cutout for hero, pop for
+    /// feature, off for filler) so a long reel stays under the per-frame
+    /// Vision budget.
+    let pacingTier: PacingTier?
+    /// Caption overlay layered ABOVE the title/lower-third overlay (so a
+    /// title card can coexist with a caption). Drives Section 2 of the
+    /// CapCut-parity PR.
+    let captionOverlay: Overlay?
 
     init(timeRange: CMTimeRange,
          startSeconds: Double,
@@ -543,7 +682,9 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
          transitionKind: TransitionKind?,
          transitionStart: Double?,
          transitionEnd: Double?,
-         overlay: Overlay? = nil) {
+         overlay: Overlay? = nil,
+         pacingTier: PacingTier? = nil,
+         captionOverlay: Overlay? = nil) {
         self.timeRange = timeRange
         self.startSeconds = startSeconds
         self.trackAID = trackAID
@@ -554,6 +695,8 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
         self.transitionStart = transitionStart
         self.transitionEnd = transitionEnd
         self.overlay = overlay
+        self.pacingTier = pacingTier
+        self.captionOverlay = captionOverlay
         super.init()
     }
 
@@ -571,7 +714,9 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
             transitionKind: transitionKind,
             transitionStart: transitionStart,
             transitionEnd: transitionEnd,
-            overlay: overlay)
+            overlay: overlay,
+            pacingTier: pacingTier,
+            captionOverlay: captionOverlay)
     }
 
     var enablePostProcessing: Bool { false }

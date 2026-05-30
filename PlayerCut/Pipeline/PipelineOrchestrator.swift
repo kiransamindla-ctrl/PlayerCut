@@ -121,6 +121,32 @@ actor PipelineOrchestrator {
                     await DiagnosticsStore.shared.recordEnum(
                         .reelLength,
                         value: game.reelLengthOverride ?? player.reelLengthPreference)
+                    // CapCut-parity S5 — resolve sceneType from the user's
+                    // override (Settings → Stage 1 debug) or from a 4-frame
+                    // VNClassifyImageRequest vote on the raw video. The
+                    // hardcoded `.outdoor` default set at capture is only
+                    // honored when both the override is .auto AND the
+                    // classifier abstains.
+                    let settings = ReelSettings.current
+                    switch settings.forceSceneType {
+                    case .indoor:  game.sceneType = .indoor
+                    case .outdoor: game.sceneType = .outdoor
+                    // Stadium is a marketing label for outdoor — SceneType
+                    // only has indoor/outdoor in the persisted enum. The
+                    // user-visible "stadium" option in Settings → Stage 1
+                    // collapses to .outdoor here; the downstream LUT picker
+                    // doesn't distinguish.
+                    case .stadium: game.sceneType = .outdoor
+                    case .auto:
+                        let classified = await SceneClassifier.classify(
+                            videoURL: game.rawVideoURL,
+                            sampleCount: 4)
+                        if classified != game.sceneType {
+                            self.log.info("SceneClassifier: \(game.sceneType.rawValue, privacy: .public) → \(classified.rawValue, privacy: .public)")
+                            game.sceneType = classified
+                        }
+                    }
+                    try await self.store.upsert(game)
                     await DiagnosticsStore.shared.recordEnum(
                         .sceneType,
                         value: game.sceneType)
