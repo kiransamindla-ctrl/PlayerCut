@@ -112,13 +112,16 @@ enum ColorMatchAnalyzer {
         var gMean: Float = 0
         var bMean: Float = 0
         rChan.withUnsafeBufferPointer { buf in
-            vDSP_meanv(buf.baseAddress!, 1, &rMean, vDSP_Length(pixelCount))
+            guard let ptr = buf.baseAddress else { return }
+            vDSP_meanv(ptr, 1, &rMean, vDSP_Length(pixelCount))
         }
         gChan.withUnsafeBufferPointer { buf in
-            vDSP_meanv(buf.baseAddress!, 1, &gMean, vDSP_Length(pixelCount))
+            guard let ptr = buf.baseAddress else { return }
+            vDSP_meanv(ptr, 1, &gMean, vDSP_Length(pixelCount))
         }
         bChan.withUnsafeBufferPointer { buf in
-            vDSP_meanv(buf.baseAddress!, 1, &bMean, vDSP_Length(pixelCount))
+            guard let ptr = buf.baseAddress else { return }
+            vDSP_meanv(ptr, 1, &bMean, vDSP_Length(pixelCount))
         }
         // Normalize to [0,1] for the downstream median computation.
         return SIMD3<Float>(rMean / 255, gMean / 255, bMean / 255)

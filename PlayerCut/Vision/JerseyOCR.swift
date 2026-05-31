@@ -144,7 +144,7 @@ actor JerseyOCR {
         //
         // The cap at 1.0 prevents over-confidence from inflating the
         // composite ranking score downstream.
-        let evidenceShare = votes[winner.key]! /
+        let evidenceShare = (votes[winner.key] ?? winner.value) /
             max(1, votes.values.reduce(0, +))
         let exactMatchBonus: Float = (winner.key == targetNumber) ? 0.2 : 0
         let confidence = min(1.0,

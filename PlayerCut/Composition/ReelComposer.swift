@@ -832,9 +832,11 @@ final class ReelComposer {
 
         if let next = nextClip {
             let dur = min(transitionDuration, max(0.18, renderedDur * 0.25))
+            let tEnd = segmentStart.seconds + renderedDur
+            let tStart = tEnd - dur
             transitionKind = clip.outgoingTransition
-            transitionEnd = segmentStart.seconds + renderedDur
-            transitionStart = transitionEnd! - dur
+            transitionEnd = tEnd
+            transitionStart = tStart
 
             // Insert `dur` seconds of next clip's head into trackB
             // anchored at the transition start. We use real-time playback
@@ -845,7 +847,7 @@ final class ReelComposer {
                               preferredTimescale: 600),
                 duration: CMTime(seconds: dur,
                                  preferredTimescale: 600))
-            let bInsertAt = CMTime(seconds: transitionStart!,
+            let bInsertAt = CMTime(seconds: tStart,
                                    preferredTimescale: 600)
             try? trackB.insertTimeRange(bSourceRange,
                                         of: assetVideoTrack,

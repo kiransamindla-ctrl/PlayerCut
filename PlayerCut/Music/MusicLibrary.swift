@@ -111,7 +111,7 @@ final class MusicLibrary {
                   let recycled = pool.first(where: { $0.id == oldestId }) {
             pick = recycled
         } else {
-            pick = pool.first!
+            pick = pool[0]
         }
         recordUsage(playerId: playerId, vibe: vibe,
                     trackId: pick.id, poolSize: pool.count)

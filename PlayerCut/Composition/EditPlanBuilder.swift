@@ -554,8 +554,11 @@ struct EditPlanBuilder {
         // // SOURCE: developer.apple.com/documentation/quartzcore/catransitionfunction
         // // accessed 2026-05-31 — easeInEaseOut is the standard cubic
         // // pacing curve UIKit / CoreAnimation use for "natural" motion.
+        guard let last = raw.last else {
+            return (CGPoint(x: 0.5, y: 0.5), 1.0)
+        }
         if t <= raw[0].0 { return (raw[0].1, raw[0].2) }
-        if t >= raw.last!.0 { return (raw.last!.1, raw.last!.2) }
+        if t >= last.0 { return (last.1, last.2) }
         for i in 0..<(raw.count - 1) {
             let a = raw[i]
             let b = raw[i + 1]
@@ -569,7 +572,7 @@ struct EditPlanBuilder {
                 return (c, s)
             }
         }
-        return (raw.last!.1, raw.last!.2)
+        return (last.1, last.2)
     }
 
     private func clamp<T: Comparable>(_ v: T, lo: T, hi: T) -> T {

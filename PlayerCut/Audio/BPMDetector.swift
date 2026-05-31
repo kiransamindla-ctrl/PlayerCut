@@ -208,14 +208,17 @@ enum BPMDetector {
         //    the autocorrelation. (Equivalent to a 0 Hz high-pass.)
         var mean: Double = 0
         envelope.withUnsafeBufferPointer { buf in
-            vDSP_meanvD(buf.baseAddress!, 1, &mean, vDSP_Length(n))
+            guard let ptr = buf.baseAddress else { return }
+            vDSP_meanvD(ptr, 1, &mean, vDSP_Length(n))
         }
         var hp = [Double](repeating: 0, count: n)
         var negMean = -mean
         envelope.withUnsafeBufferPointer { srcBuf in
             hp.withUnsafeMutableBufferPointer { dstBuf in
-                vDSP_vsaddD(srcBuf.baseAddress!, 1, &negMean,
-                            dstBuf.baseAddress!, 1, vDSP_Length(n))
+                guard let srcPtr = srcBuf.baseAddress,
+                      let dstPtr = dstBuf.baseAddress else { return }
+                vDSP_vsaddD(srcPtr, 1, &negMean,
+                            dstPtr, 1, vDSP_Length(n))
             }
         }
 
@@ -232,7 +235,8 @@ enum BPMDetector {
         //    which lives in [-1, 1] and is robust to envelope scale.
         var r0: Double = 0
         hp.withUnsafeBufferPointer { hpBuf in
-            vDSP_svesqD(hpBuf.baseAddress!, 1, &r0, vDSP_Length(n))
+            guard let ptr = hpBuf.baseAddress else { return }
+            vDSP_svesqD(ptr, 1, &r0, vDSP_Length(n))
         }
         guard r0 > 1e-12 else {
             return Result(bpm: fallbackBPM, confidence: 0, didFallback: true)
@@ -257,10 +261,11 @@ enum BPMDetector {
         var acf = [Double](repeating: 0, count: maxLag - minLag + 1)
         var biased = [Double](repeating: 0, count: acf.count)
         hp.withUnsafeBufferPointer { hpBuf in
+            guard let basePtr = hpBuf.baseAddress else { return }
             for lag in minLag...maxLag {
                 var dot: Double = 0
-                vDSP_dotprD(hpBuf.baseAddress!, 1,
-                            hpBuf.baseAddress! + lag, 1,
+                vDSP_dotprD(basePtr, 1,
+                            basePtr + lag, 1,
                             &dot, vDSP_Length(n - lag))
                 let raw = dot / r0
                 acf[lag - minLag] = raw

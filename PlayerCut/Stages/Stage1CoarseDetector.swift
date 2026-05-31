@@ -260,10 +260,13 @@ actor Stage1CoarseDetector {
                                   sigma: Float) async throws -> [CandidateWindow] {
         let samples = await loudnessSamplesFromSource(videoURL: videoURL)
         log.info("Stage 1 audio (source decode): \(samples.count) envelope samples")
-        guard samples.count > 20 else { return [] }
+        guard samples.count > 20,
+              let firstSample = samples.first,
+              let lastSample = samples.last
+        else { return [] }
 
         let sampleRateHz = Double(samples.count) /
-            max(1.0, samples.last!.t - samples.first!.t)
+            max(1.0, lastSample.t - firstSample.t)
         let baselineSamples = max(5, Int(audioBaselineWindow * sampleRateHz))
 
         var aboveThreshold: [(time: Double, rms: Float)] = []

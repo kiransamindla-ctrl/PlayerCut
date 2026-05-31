@@ -1006,13 +1006,13 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
     var passthroughTrackID: CMPersistentTrackID { kCMPersistentTrackID_Invalid }
 
     func cropKeyframeAt(localTime t: Double) -> CropKeyframe {
-        guard !cropKeyframes.isEmpty else {
+        guard let last = cropKeyframes.last else {
             return CropKeyframe(time: 0,
                                 center: CGPoint(x: 0.5, y: 0.5),
                                 scale: 1.0)
         }
         if t <= cropKeyframes[0].time { return cropKeyframes[0] }
-        if t >= cropKeyframes.last!.time { return cropKeyframes.last! }
+        if t >= last.time { return last }
         for i in 0..<(cropKeyframes.count - 1) {
             let a = cropKeyframes[i]
             let b = cropKeyframes[i + 1]
@@ -1025,7 +1025,7 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
                 return CropKeyframe(time: t, center: c, scale: s)
             }
         }
-        return cropKeyframes.last!
+        return last
     }
 
     func transitionForOutputTime(_ time: Double) -> TransitionBlend? {

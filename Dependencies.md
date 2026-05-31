@@ -8,6 +8,7 @@ Apple-native path is insufficient.
 | Name | Type | License | Source URL | Date added | Reason Apple-native is insufficient |
 |------|------|---------|------------|------------|-------------------------------------|
 | MetalPetal | Swift package (SPM) | MIT | https://github.com/MetalPetal/MetalPetal (v1.25.2) | 2026-05-20 | The cinematic compositor needs a unified GPU render path that draws clips, A/B transitions, color grade, and rasterized title/lower-third overlays in one pass. Mixing AVVideoCompositionCoreAnimationTool with a custom CIContext compositor is an Apple-API conflict that broke export on real devices (see Section 2.1 root cause). MetalPetal's `MTIImage` graph + `MTIContext` give us one Metal-backed render that draws every output frame without the CoreAnimationTool detour. |
+| SwiftLint | Build-time CLI tool (Homebrew) | MIT | https://github.com/realm/SwiftLint (v0.63.3) | 2026-05-31 | Not linked into the shipped binary, not a runtime dependency — used as a static checker for force-unwraps, implicitly unwrapped optionals, and other failure-mode lints that Xcode does not catch on its own. Apple's `xcodebuild analyze` catches Objective-C / Clang-static-analyzer issues but does not lint Swift-specific patterns. Config: `.swiftlint.yml` at repo root. |
 
 ## Pending / planned additions
 
