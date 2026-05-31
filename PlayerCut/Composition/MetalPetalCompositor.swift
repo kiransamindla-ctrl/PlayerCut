@@ -379,6 +379,21 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                              overlay: warm,
                              alpha: 0.7 * flash,
                              outputSize: outputSize)
+
+        case .flash:
+            // Single-frame white-flash punctuation. A is replaced by a
+            // full-frame white at t=0.5, blending back to B by t=1.0.
+            // Cheaper than the lightLeakWipe additive path — used by
+            // "trendy-transitions" on the highest-energy beat only.
+            let white = solidColor(red: 1.0, green: 1.0, blue: 1.0,
+                                   alpha: 1.0,
+                                   size: outputSize)
+            let blendIn = max(0, 1 - abs(t - 0.5) * 2)  // 0 → 1 → 0 across t
+            let base = dissolve(a: a, b: b, t: t)
+            return composite(over: base,
+                             overlay: white,
+                             alpha: blendIn,
+                             outputSize: outputSize)
         }
     }
 

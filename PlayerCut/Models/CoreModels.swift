@@ -28,6 +28,11 @@ struct PlayerEnrollment: Codable, Identifiable {
     /// enrollment step. When present, Stage 2 may skip the OCR/color/
     /// face stack on frames where the beacon is in-range.
     var beaconID: String? = nil
+    /// Per-player default `ReelTemplate.id`. nil = use the system
+    /// default (`TemplateRegistry.defaultTemplateID`). Set from
+    /// Settings → Templates and re-read on each compose so the user's
+    /// last pick sticks across sessions.
+    var defaultTemplateID: String? = nil
 
     init(id: UUID,
          name: String,
@@ -39,7 +44,8 @@ struct PlayerEnrollment: Codable, Identifiable {
          reelLengthPreference: ReelLength = .sixtySeconds,
          outputAspect: OutputAspect = .vertical9x16,
          musicVibe: MusicVibe = .energetic,
-         beaconID: String? = nil) {
+         beaconID: String? = nil,
+         defaultTemplateID: String? = nil) {
         self.id = id
         self.name = name
         self.jerseyNumber = jerseyNumber
@@ -51,6 +57,7 @@ struct PlayerEnrollment: Codable, Identifiable {
         self.outputAspect = outputAspect
         self.musicVibe = musicVibe
         self.beaconID = beaconID
+        self.defaultTemplateID = defaultTemplateID
     }
 
     // Back-compat decode for players enrolled before reelLengthPreference /
@@ -72,6 +79,11 @@ struct PlayerEnrollment: Codable, Identifiable {
         musicVibe = try c.decodeIfPresent(MusicVibe.self,
                                           forKey: .musicVibe) ?? .energetic
         beaconID = try c.decodeIfPresent(String.self, forKey: .beaconID)
+        // CapCut-parity S4 — per-player template default. Missing on
+        // pre-template enrollments → falls through to system default
+        // at resolve time.
+        defaultTemplateID = try c.decodeIfPresent(String.self,
+                                                  forKey: .defaultTemplateID)
     }
 }
 
