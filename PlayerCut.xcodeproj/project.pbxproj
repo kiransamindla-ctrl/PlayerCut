@@ -72,6 +72,7 @@
 		9BD893A163C8F863EDB1C129 /* EditPlanBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0DF7EAB0BC523AAFD00A41C /* EditPlanBuilder.swift */; };
 		9CB02794E9FDA8DE11CFE335 /* PlayerCutUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7497571612E03DE355B52CD3 /* PlayerCutUITests.swift */; };
 		9CEC45315F2B7BACF9763581 /* MusicLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B37479B5A9C81C2B2857A525 /* MusicLibrary.swift */; };
+		9D746D13194C5228B1061AF0 /* CoordinateAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 652BB15D1BD3FE399AA8B369 /* CoordinateAuditTests.swift */; };
 		A2E8D73BA65F7BA6E03563C6 /* playful_5.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 88A2F4AE97A3367151363CE8 /* playful_5.m4a */; };
 		A5BFF6417DDFD519FF73189C /* LUTFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46CCE07A6E2B577DADAF5544 /* LUTFactory.swift */; };
 		A6F41FC3E70E12C7BE36210F /* energetic_3.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 4C653CF2C73129FFD1E90355 /* energetic_3.m4a */; };
@@ -152,6 +153,7 @@
 		5F4A4B71D8E971A80AF66723 /* CompositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompositionTests.swift; sourceTree = "<group>"; };
 		608D09E55BF686A8910AF245 /* EnrollmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnrollmentViews.swift; sourceTree = "<group>"; };
 		633792CC35061969E97C24D8 /* playful_1.m4a */ = {isa = PBXFileReference; path = playful_1.m4a; sourceTree = "<group>"; };
+		652BB15D1BD3FE399AA8B369 /* CoordinateAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoordinateAuditTests.swift; sourceTree = "<group>"; };
 		66D00ECD5C55F39FB0B691F9 /* DiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsView.swift; sourceTree = "<group>"; };
 		6A1075CB059A40D14F1DB938 /* BackgroundProcessingV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundProcessingV2.swift; sourceTree = "<group>"; };
 		6B46A953614CD72FEE7235DF /* PreRecordSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreRecordSheet.swift; sourceTree = "<group>"; };
@@ -341,6 +343,7 @@
 			children = (
 				4359A84AF81C2A474BF8D802 /* BPMDetectorTests.swift */,
 				5F4A4B71D8E971A80AF66723 /* CompositionTests.swift */,
+				652BB15D1BD3FE399AA8B369 /* CoordinateAuditTests.swift */,
 				215BC0C3EDC8C14473879D32 /* ExportTempoTests.swift */,
 				CA0F8A80B4A9C591C60B82B5 /* PlayerCutTests.swift */,
 				5B9209D6081BE50130FEE217 /* ReelQualityTests.swift */,
@@ -781,6 +784,7 @@
 			files = (
 				91A196C14884DAA941329F6B /* BPMDetectorTests.swift in Sources */,
 				C64DC90B62B7DE166E378DFE /* CompositionTests.swift in Sources */,
+				9D746D13194C5228B1061AF0 /* CoordinateAuditTests.swift in Sources */,
 				28960BFCBEFDD98BA916DF3F /* ExportTempoTests.swift in Sources */,
 				85DCFCCA63858A8469FDE82E /* PlayerCutTests.swift in Sources */,
 				F5900BE0B10F11DDF6A39008 /* ReelQualityTests.swift in Sources */,
