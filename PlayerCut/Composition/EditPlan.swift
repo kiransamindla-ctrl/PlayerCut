@@ -95,6 +95,8 @@ enum ColorLook: String, Codable {
     case natural
     case stadium    // teal-orange sports
     case warm       // gentle cinematic
+    case punchy     // high-contrast / high-sat — for fast-cut / attitude templates
+    case soft       // lifted blacks, desaturated cyan-pink — aesthetic-slow / dreamy
 }
 
 // MARK: - Plan + child types
@@ -148,6 +150,18 @@ struct OutputSpec {
     var preferHEVC: Bool = true
 }
 
+/// Pacing tier (Section 2). The ranker doesn't know tiers — they're
+/// assigned by EditPlanBuilder based on score percentile so the top
+/// play gets the long hold + slow-mo + apex freeze, the rest stay tight.
+enum PacingTier: String, Codable {
+    /// Top 1-2 plays. Long hold (~4-6s), slow-mo at apex, 0.3s freeze.
+    case hero
+    /// Next ~30%. Standard (~3-4s, normal speed).
+    case feature
+    /// Remaining body. Tight hard cuts on the beat (~2-3s).
+    case filler
+}
+
 /// One renderable segment of source video, with all decisions baked in.
 struct ClipPlan: Identifiable {
     let id: UUID
@@ -166,14 +180,31 @@ struct ClipPlan: Identifiable {
     /// 0..1 energy score (derived from composite + audio + action).
     /// Drives transition choice and ramp aggression.
     var energy: Float
+    /// Section 2 pacing tier. Defaults to .feature (no special handling).
+    var pacingTier: PacingTier = .feature
+    /// Extra rendered seconds tacked on by holding the last frame —
+    /// hero "apex freeze." 0 = no freeze. ReelComposer.insertClip honors
+    /// it by inserting one last source frame scaled to this duration.
+    var freezeFrameSeconds: Double = 0
+    /// PR #11 S3 — per-channel multiplicative correction applied BEFORE
+    /// the LUT blend so a sun-into-shade pan doesn't break the look.
+    /// Default identity (1,1,1) skips the pre-LUT pass entirely; the
+    /// orchestrator overwrites this with ColorMatchAnalyzer's output
+    /// when auto color match runs.
+    var colorMatchGain: SIMD3<Float> = SIMD3<Float>(1, 1, 1)
+    /// PR #11 S4 — opt-in particle overlay propagated from the active
+    /// template's extras.particles. nil = no particle layer rendered.
+    var particles: ParticleKind? = nil
 
     /// Source duration before any speed mapping.
     var sourceDuration: Double { sourceEnd - sourceStart }
 
-    /// Rendered (output) duration after the speed curve has been
-    /// applied. Speed factor < 1.0 stretches time → longer rendered.
+    /// Rendered (output) duration after the speed curve has been applied
+    /// AND the apex freeze (if any). Speed factor < 1.0 stretches time;
+    /// freeze adds a held final frame on top.
     var renderedDuration: Double {
         speedCurve.renderedDuration(forSource: sourceDuration)
+            + freezeFrameSeconds
     }
 }
 
@@ -237,6 +268,11 @@ enum TransitionKind: String, Codable {
     /// Fade from / to solid black. Reserved for opening + closing.
     case fadeFromBlack
     case fadeToBlack
+    /// Single-frame white-flash punctuation. Used by the
+    /// "trendy-transitions" template on the highest-energy beat.
+    /// When the compositor doesn't implement it yet, falls back to
+    /// .hardCut (still snaps to the beat).
+    case flash
 }
 
 // MARK: - Title cards

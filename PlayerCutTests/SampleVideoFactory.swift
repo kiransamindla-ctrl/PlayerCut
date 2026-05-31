@@ -28,6 +28,13 @@ enum SampleVideoFactory {
         var size = CGSize(width: 1280, height: 720)   // 16:9 landscape, like a phone camera
         var fps: Int32 = 30
         var durationSeconds: Double = 8
+        /// When true, the .mov includes an audio track (440 Hz sine, low
+        /// amplitude) plus a louder 1 s "hit" centered at
+        /// `audioPeakSeconds`. Lets the peak detector + duck/boost mix
+        /// be exercised on the simulator without a real recording.
+        var includeAudio = true
+        var audioPeakSeconds: Double = 4.0
+        var audioPeakDuration: Double = 1.0
     }
 
     enum FactoryError: Error, CustomStringConvertible {
@@ -133,7 +140,91 @@ enum SampleVideoFactory {
                 writer.error?.localizedDescription
                     ?? "finishWriting ended in status \(writer.status.rawValue)")
         }
-        return url
+        guard spec.includeAudio else { return url }
+        return try await muxAudio(into: url, spec: spec)
+    }
+
+    /// Writes a WAV with a quiet 440 Hz sine + a louder 1 s burst centered
+    /// at `spec.audioPeakSeconds`, then muxes it into the video-only .mov
+    /// via passthrough export. The output replaces the video-only file so
+    /// callers still get exactly one URL back.
+    private static func muxAudio(into videoOnlyURL: URL, spec: Spec) async throws -> URL {
+        let wavURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("playercut-sample-audio-\(UUID().uuidString).wav")
+        try? FileManager.default.removeItem(at: wavURL)
+        try writeWAV(to: wavURL, spec: spec)
+        defer { try? FileManager.default.removeItem(at: wavURL) }
+
+        // Mux video + audio via passthrough export — fast, no recompress.
+        let comp = AVMutableComposition()
+        let video = AVURLAsset(url: videoOnlyURL)
+        guard let vSrc = try await video.loadTracks(withMediaType: .video).first,
+              let vDst = comp.addMutableTrack(
+                withMediaType: .video,
+                preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw FactoryError.appendFailed("mux: video track unavailable")
+        }
+        let vDur = try await video.load(.duration)
+        try vDst.insertTimeRange(CMTimeRange(start: .zero, duration: vDur),
+                                 of: vSrc, at: .zero)
+
+        let audio = AVURLAsset(url: wavURL)
+        if let aSrc = try await audio.loadTracks(withMediaType: .audio).first,
+           let aDst = comp.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let aDur = try await audio.load(.duration)
+            try aDst.insertTimeRange(
+                CMTimeRange(start: .zero, duration: CMTimeMinimum(aDur, vDur)),
+                of: aSrc, at: .zero)
+        }
+
+        let muxedURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("playercut-sample-muxed-\(UUID().uuidString).mov")
+        try? FileManager.default.removeItem(at: muxedURL)
+        guard let exp = AVAssetExportSession(
+            asset: comp, presetName: AVAssetExportPresetPassthrough) else {
+            throw FactoryError.appendFailed("mux: cannot create export session")
+        }
+        exp.outputURL = muxedURL
+        exp.outputFileType = .mov
+        await exp.export()
+        guard exp.status == .completed else {
+            throw FactoryError.appendFailed(
+                "mux export failed: \(exp.error?.localizedDescription ?? "status \(exp.status.rawValue)")")
+        }
+        try? FileManager.default.removeItem(at: videoOnlyURL)
+        return muxedURL
+    }
+
+    private static func writeWAV(to url: URL, spec: Spec) throws {
+        let sampleRate: Double = 44100
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                         sampleRate: sampleRate, channels: 1,
+                                         interleaved: false) else {
+            throw FactoryError.appendFailed("WAV format unavailable")
+        }
+        let audioFile = try AVAudioFile(forWriting: url,
+                                        settings: format.settings,
+                                        commonFormat: .pcmFormatFloat32,
+                                        interleaved: false)
+        let totalFrames = AVAudioFrameCount(spec.durationSeconds * sampleRate)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                            frameCapacity: totalFrames) else {
+            throw FactoryError.appendFailed("WAV buffer unavailable")
+        }
+        buffer.frameLength = totalFrames
+        let ch = buffer.floatChannelData![0]
+        let peakStart = spec.audioPeakSeconds
+        let peakEnd = peakStart + spec.audioPeakDuration
+        let bedAmp: Float = 0.06    // quiet background tone
+        let peakAmp: Float = 0.55   // ~ 20 dB louder
+        for i in 0..<Int(totalFrames) {
+            let t = Double(i) / sampleRate
+            let amp = (t >= peakStart && t < peakEnd) ? peakAmp : bedAmp
+            ch[i] = amp * sinf(2 * .pi * 440 * Float(t))
+        }
+        try audioFile.write(from: buffer)
     }
 
     private static func draw(frame: Int, total: Int,

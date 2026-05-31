@@ -23,8 +23,10 @@ struct DiagnosticsView: View {
     @State private var exportData: Data?
     @State private var showingShareSheet = false
     @State private var showingResetConfirm = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        NavigationStack {
         List {
             if let snap = snapshot {
                 ReelOutcomesSection(counters: snap.counters)
@@ -46,6 +48,16 @@ struct DiagnosticsView: View {
             }
         }
         .navigationTitle("Diagnostics")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Done") {
+                    Haptic.tap()
+                    dismiss()
+                }
+                .accessibilityIdentifier("diagnostics-done")
+            }
+        }
         .task { await refresh() }
         .refreshable { await refresh() }
         .sheet(isPresented: $showingShareSheet) {
@@ -69,6 +81,7 @@ struct DiagnosticsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Counters and timings stored on this device will be removed.")
+        }
         }
     }
 

@@ -114,9 +114,8 @@ actor DiagnosticsStore {
         let day = dayKey(for: Date())
         var dist = snapshot.dailyEvents[key.rawValue] ?? [:]
         dist[day, default: 0] += 1
+        prune(distribution: &dist, keep: 30)
         snapshot.dailyEvents[key.rawValue] = dist
-        prune(distribution: &snapshot.dailyEvents[key.rawValue]!,
-              keep: 30)
         persistDebounced()
     }
 

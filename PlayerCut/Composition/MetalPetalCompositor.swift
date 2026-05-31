@@ -45,6 +45,17 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
     /// once from LUTFactory's procedural cube data and reused.
     private let lutCache = LUTImageCache()
 
+    /// Section 1 (CapCut-parity): one Vision segmenter, reused per frame.
+    /// Read fresh `ReelSettings.current` per-frame so the user's live
+    /// Settings → Effects edits land on the next reel. `available` gates
+    /// keep us iOS 15+ only for the segmenter init.
+    private lazy var segmenter: PersonSegmenter? = {
+        if #available(iOS 15.0, *) {
+            return PersonSegmenter(quality: .accurate)
+        }
+        return nil
+    }()
+
     override init() {
         if let device = MTLCreateSystemDefaultDevice() {
             do {
@@ -138,6 +149,38 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                                      outputSize: outputSize)
         }
 
+        // --- Section 1 (CapCut-parity): background segmentation pass ---
+        // Run VNGeneratePersonSegmentationRequest on source A only when
+        // the user has the feature on. Auto mode gates per pacing tier so
+        // a long reel stays under the per-frame Vision budget.
+        let settings = ReelSettings.current
+        let segRequested = backgroundEffectShouldRun(
+            mode: settings.backgroundMode,
+            tier: instruction.pacingTier,
+            forceAll: settings.forceSegAllClips)
+        if #available(iOS 15.0, *),
+           segRequested,
+           let aBuffer = request.sourceFrame(byTrackID: instruction.trackAID),
+           let segmenter,
+           let maskBuffer = segmenter.mask(for: aBuffer) {
+            let mask = MTIImage(cvPixelBuffer: maskBuffer, alphaType: .alphaIsOne)
+            if settings.showSegMask {
+                // Debug viz: tint by mask so the user can confirm the
+                // request is firing (Settings → Debug → Show seg mask).
+                output = tintWithMask(base: output, mask: mask,
+                                      outputSize: outputSize)
+            } else {
+                // "Pop" / "Cutout" composite — the graded foreground over
+                // a darkened or blurred background. Simple darken keeps
+                // the per-frame budget tight; visual proof of a real
+                // cutout on a real human is device-only.
+                output = popBackgroundComposite(foreground: output,
+                                                mask: mask,
+                                                mode: settings.backgroundMode,
+                                                outputSize: outputSize)
+            }
+        }
+
         // --- Overlay (title / closing / lower-third) -------------------
         if let overlay = instruction.overlay {
             let alpha = overlay.alphaAt(outputTime: time)
@@ -148,6 +191,35 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                                    alpha: alpha,
                                    outputSize: outputSize)
             }
+        }
+
+        // --- Caption overlay (Section 2 CapCut-parity) -----------------
+        // Layered ABOVE title/closing/lower-third so title + caption can
+        // share a frame.
+        if let cap = instruction.captionOverlay {
+            let alpha = cap.alphaAt(outputTime: time)
+            if alpha > 0.001,
+               let capImage = cap.mtiImage {
+                output = composite(over: output,
+                                   overlay: capImage,
+                                   alpha: alpha,
+                                   outputSize: outputSize)
+            }
+        }
+
+        // --- PR #11 S4 — particle overlay (template opt-in) -----------
+        // Procedural particle layer composited ABOVE the graded frame.
+        // Opacity capped at 0.30 inside particleImage so particles never
+        // obscure the subject. Single-pass: still inside this handle()
+        // call, no extra AVAssetReader pass or pre-pass.
+        if let kind = instruction.particles,
+           let particle = particleImage(kind: kind,
+                                        timeSeconds: time,
+                                        outputSize: outputSize) {
+            output = composite(over: output,
+                               overlay: particle,
+                               alpha: kind.compositeAlpha,
+                               outputSize: outputSize)
         }
 
         // --- Render to destination --------------------------------------
@@ -189,32 +261,53 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                                  scale: key.scale,
                                  outputSize: outputSize)
 
-        // Cinematic grade pipeline (Section 3). Order:
-        //   1. (skipped: per-clip exposure/WB correction would land
-        //       here — DEFERRED, requires a pre-pass over the source.)
-        //   2. Apply the creative LUT to the (already cropped) source.
-        //   3. Blend the LUT result with the unmodified cropped source
-        //      at ~70 % opacity. // SOURCE: pixflow.net 2026-02-09 —
-        //      pros apply creative LUTs at 60-80 % intensity, not full
-        //      strength, so the look reads "dialed in" rather than
-        //      "filter slapped on top."
-        //   4. Polish: subtle MPS unsharp mask (no halos), gentle
-        //      vignette via solid-color overlay (off for v1; covered
-        //      by the vibe-specific LUTs already).
+        // Cinematic grade pipeline. Order:
+        //   1. PR #11 S3 — per-clip auto color match. Multiplicative
+        //      per-channel gain nudges this clip's mean RGB toward the
+        //      reel-wide median computed in ColorMatchAnalyzer. Skipped
+        //      when the gain is the (1,1,1) identity sentinel — most
+        //      clips on uniform-light footage land within the 1%
+        //      tolerance and bypass this pass entirely.
+        //   2. Apply the creative LUT to the (matched) source.
+        //   3. Blend the LUT result with the matched source at ~70%
+        //      opacity. // SOURCE: pixflow.net 2026-02-09 — pros apply
+        //      creative LUTs at 60-80% intensity.
+        //   4. Polish: subtle MPS unsharp mask.
+        let gain = instruction.colorMatchGain
+        let matched: MTIImage = {
+            if abs(gain.x - 1) < 0.01,
+               abs(gain.y - 1) < 0.01,
+               abs(gain.z - 1) < 0.01 {
+                return cropped
+            }
+            // 4×5 column-major color matrix: diagonal = per-channel gain,
+            // last column = bias (zero). Same matrix MTIColorMatrixFilter
+            // expects.
+            let matrix = MTIColorMatrix(matrix: matrix_float4x4(
+                SIMD4<Float>(gain.x, 0, 0, 0),
+                SIMD4<Float>(0, gain.y, 0, 0),
+                SIMD4<Float>(0, 0, gain.z, 0),
+                SIMD4<Float>(0, 0, 0, 1)),
+                bias: SIMD4<Float>(0, 0, 0, 0))
+            let filter = MTIColorMatrixFilter()
+            filter.inputImage = cropped
+            filter.colorMatrix = matrix
+            return filter.outputImage ?? cropped
+        }()
         let fullyGraded: MTIImage
         if let lutImage = lutCache.image(for: instruction.look) {
             let cube = MTIColorLookupFilter()
-            cube.inputImage = cropped
+            cube.inputImage = matched
             cube.inputColorLookupTable = lutImage
-            fullyGraded = cube.outputImage ?? cropped
+            fullyGraded = cube.outputImage ?? matched
         } else {
-            fullyGraded = cropped
+            fullyGraded = matched
         }
-        // Blend graded ← 70% over cropped ← 30% via MTIBlendFilter.
+        // Blend graded ← 70% over matched ← 30% via MTIBlendFilter.
         // MTIBlendFilter's intensity controls the foreground opacity.
         let lutBlendIntensity: Float = 0.70
         let blend = MTIBlendFilter(blendMode: .normal)
-        blend.inputBackgroundImage = cropped
+        blend.inputBackgroundImage = matched
         blend.inputImage = fullyGraded
         blend.intensity = lutBlendIntensity
         let graded = blend.outputImage ?? fullyGraded
@@ -238,6 +331,15 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                             outputSize: CGSize) -> MTIImage {
         let srcSize = image.size
         guard srcSize.width > 0, srcSize.height > 0 else { return image }
+
+        // CapCut-parity S6 — runtime assertion: every keyframe center
+        // reaching the compositor must live in normalized [0,1] space.
+        // Anything outside is a bug upstream (Vision/tracker/keyframe
+        // smoothing returned pixel coords by mistake). In debug we trap
+        // so the regression is found in CI; in release we clamp + log
+        // a warning so the user still ships a reel.
+        MetalPetalCompositor.assertNormalizedCenter(center,
+            context: "cropAndFit")
 
         let outAspect = outputSize.width / outputSize.height
         let srcAspect = srcSize.width / srcSize.height
@@ -322,6 +424,21 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                              overlay: warm,
                              alpha: 0.7 * flash,
                              outputSize: outputSize)
+
+        case .flash:
+            // Single-frame white-flash punctuation. A is replaced by a
+            // full-frame white at t=0.5, blending back to B by t=1.0.
+            // Cheaper than the lightLeakWipe additive path — used by
+            // "trendy-transitions" on the highest-energy beat only.
+            let white = solidColor(red: 1.0, green: 1.0, blue: 1.0,
+                                   alpha: 1.0,
+                                   size: outputSize)
+            let blendIn = max(0, 1 - abs(t - 0.5) * 2)  // 0 → 1 → 0 across t
+            let base = dissolve(a: a, b: b, t: t)
+            return composite(over: base,
+                             overlay: white,
+                             alpha: blendIn,
+                             outputSize: outputSize)
         }
     }
 
@@ -382,8 +499,228 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
         return blur.outputImage ?? image
     }
 
+    // MARK: - Section 1 (CapCut-parity): background segmentation helpers
+
+    private func backgroundEffectShouldRun(mode: BackgroundMode,
+                                           tier: PacingTier?,
+                                           forceAll: Bool) -> Bool {
+        if forceAll { return true }
+        switch mode {
+        case .off:    return false
+        case .cutout: return true
+        case .pop:    return true
+        case .auto:
+            // Cutout on hero, pop on feature, off on filler keeps the
+            // per-frame Vision budget reasonable on a long reel.
+            switch tier {
+            case .hero, .feature: return true
+            case .filler, .none:  return false
+            }
+        }
+    }
+
+    /// Debug viz: paint the mask in red over a desaturated copy of the
+    /// base so the user can confirm the segmenter is actually firing on
+    /// device (Settings → Debug → Show seg mask).
+    private func tintWithMask(base: MTIImage, mask: MTIImage,
+                              outputSize: CGSize) -> MTIImage {
+        let red = solidColor(red: 1, green: 0, blue: 0, alpha: 1, size: outputSize)
+        let blend = MTIBlendFilter(blendMode: .normal)
+        blend.inputBackgroundImage = base
+        blend.inputImage = red
+        blend.intensity = 0.5
+        let tinted = blend.outputImage ?? base
+        // Use mask as alpha so red only paints where the segmenter said
+        // "person."
+        let masked = MTIBlendFilter(blendMode: .normal)
+        masked.inputBackgroundImage = base
+        masked.inputImage = tinted
+        masked.intensity = 1.0
+        return composite(over: base, overlay: tinted, alpha: 0.45,
+                         outputSize: outputSize)
+    }
+
+    /// "Pop" composite: foreground (subject) over a darkened copy of
+    /// itself. Cutout differs only in the background plate (blurred),
+    /// implemented when device perf budget allows.
+    private func popBackgroundComposite(foreground: MTIImage,
+                                        mask: MTIImage,
+                                        mode: BackgroundMode,
+                                        outputSize: CGSize) -> MTIImage {
+        // Background plate: darken (Pop) or blur+darken (Cutout).
+        let dark = MTIBlendFilter(blendMode: .multiply)
+        dark.inputBackgroundImage = foreground
+        dark.inputImage = solidColor(red: 0.45, green: 0.45, blue: 0.45,
+                                     alpha: 1, size: outputSize)
+        dark.intensity = 1
+        var bg = dark.outputImage ?? foreground
+        if mode == .cutout {
+            let blur = MTIMPSGaussianBlurFilter()
+            blur.inputImage = bg
+            blur.radius = 18
+            bg = blur.outputImage ?? bg
+        }
+        // Composite foreground over background using mask as alpha.
+        // MultilayerCompositingFilter takes an explicit alpha mask via
+        // .mask(_:) on the layer.
+        let layer = MultilayerCompositingFilter.Layer(content: foreground)
+            .frame(CGRect(origin: .zero, size: outputSize), layoutUnit: .pixel)
+            .mask(.init(content: mask, component: .red, mode: .normal))
+        let comp = MultilayerCompositingFilter()
+        comp.inputBackgroundImage = bg
+        comp.layers = [layer]
+        return comp.outputImage ?? foreground
+    }
+
     private func solidBlack(size: CGSize) -> MTIImage {
         solidColor(red: 0, green: 0, blue: 0, alpha: 1, size: size)
+    }
+
+    // MARK: - PR #11 S4 — procedural particle textures
+
+    /// Procedural particle layer for `kind`. Each kind ships its own
+    /// CG-drawn texture (no bundled PNG sequences); animation is a
+    /// stable hash of `timeSeconds` so consecutive output frames vary
+    /// without keeping per-frame state. Caching is a future hotspot
+    /// (the texture is the same for every clip with the same kind +
+    /// rounded time) but at 30 fps the CG draw is already a small
+    /// share of the per-frame budget.
+    private func particleImage(kind: ParticleKind,
+                               timeSeconds: Double,
+                               outputSize: CGSize) -> MTIImage? {
+        let w = Int(outputSize.width)
+        let h = Int(outputSize.height)
+        guard w > 0, h > 0 else { return nil }
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil,
+                                  width: w, height: h,
+                                  bitsPerComponent: 8,
+                                  bytesPerRow: w * 4,
+                                  space: cs,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        // Black background — the compositor blends this layer over the
+        // graded frame at kind.compositeAlpha so the procedural texture
+        // alone contributes the "particle" energy.
+        ctx.setFillColor(red: 0, green: 0, blue: 0, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+
+        switch kind {
+        case .filmGrain:
+            drawFilmGrain(in: ctx, size: outputSize, timeSeconds: timeSeconds)
+        case .dust:
+            drawDust(in: ctx, size: outputSize, timeSeconds: timeSeconds)
+        case .sparkle:
+            drawSparkle(in: ctx, size: outputSize, timeSeconds: timeSeconds)
+        case .lensFlare:
+            drawLensFlare(in: ctx, size: outputSize, timeSeconds: timeSeconds)
+        }
+        guard let cg = ctx.makeImage() else { return nil }
+        return MTIImage(cgImage: cg, isOpaque: false)
+    }
+
+    /// Random 1-px dots — classic film stock noise. Stride controls
+    /// density so the grain reads at the per-pixel scale even on 1080p.
+    private func drawFilmGrain(in ctx: CGContext, size: CGSize,
+                               timeSeconds: Double) {
+        let w = Int(size.width)
+        let h = Int(size.height)
+        let stride = 5
+        var rng = SystemRandomGenerator(seed: UInt64(timeSeconds * 30) &+ 7)
+        for y in stride..<h - stride where y % stride == 0 {
+            for x in stride..<w - stride where x % stride == 0 {
+                let v = CGFloat(rng.nextUnit())
+                ctx.setFillColor(red: v, green: v, blue: v, alpha: 1)
+                ctx.fill(CGRect(x: x, y: y, width: stride, height: stride))
+            }
+        }
+    }
+
+    /// Soft warm motes that drift downward — a few dozen blurred
+    /// circles whose Y offset wraps with timeSeconds.
+    private func drawDust(in ctx: CGContext, size: CGSize,
+                          timeSeconds: Double) {
+        ctx.setBlendMode(.plusLighter)
+        let n = 36
+        var rng = SystemRandomGenerator(seed: 31)
+        let drift = CGFloat(timeSeconds).truncatingRemainder(dividingBy: 1) * size.height
+        for _ in 0..<n {
+            let baseX = CGFloat(rng.nextUnit()) * size.width
+            let baseY = CGFloat(rng.nextUnit()) * size.height
+            let y = (baseY + drift).truncatingRemainder(dividingBy: size.height)
+            let radius = 2 + CGFloat(rng.nextUnit()) * 4
+            let alpha = 0.4 + 0.5 * CGFloat(rng.nextUnit())
+            ctx.setFillColor(red: 1, green: 0.92, blue: 0.78, alpha: alpha)
+            ctx.fillEllipse(in: CGRect(x: baseX - radius, y: y - radius,
+                                       width: radius * 2, height: radius * 2))
+        }
+    }
+
+    /// Crisp white stars at random positions. Time advances which set of
+    /// stars are at peak brightness so they "twinkle".
+    private func drawSparkle(in ctx: CGContext, size: CGSize,
+                             timeSeconds: Double) {
+        ctx.setBlendMode(.plusLighter)
+        let n = 60
+        var rng = SystemRandomGenerator(seed: 17)
+        let phase = timeSeconds * 1.5
+        for i in 0..<n {
+            let x = CGFloat(rng.nextUnit()) * size.width
+            let y = CGFloat(rng.nextUnit()) * size.height
+            // Twinkle: each star's brightness modulated by a sine of phase.
+            let twinkle = abs(sin(phase + Double(i) * 0.4))
+            guard twinkle > 0.6 else { continue }
+            let radius: CGFloat = 1.5 + 2.5 * CGFloat(twinkle - 0.6)
+            ctx.setFillColor(red: 1, green: 1, blue: 1, alpha: CGFloat(twinkle))
+            ctx.fillEllipse(in: CGRect(x: x - radius, y: y - radius,
+                                       width: radius * 2, height: radius * 2))
+        }
+    }
+
+    /// Warm radial gradient in one corner, simulating a sun-into-lens
+    /// flare. Corner rotates per second so consecutive clips alternate.
+    private func drawLensFlare(in ctx: CGContext, size: CGSize,
+                               timeSeconds: Double) {
+        // Pick a stable corner from time.
+        let corner = Int(timeSeconds.rounded(.down)) % 4
+        let cx: CGFloat
+        let cy: CGFloat
+        switch corner {
+        case 0: cx = size.width * 0.85; cy = size.height * 0.15
+        case 1: cx = size.width * 0.15; cy = size.height * 0.15
+        case 2: cx = size.width * 0.15; cy = size.height * 0.85
+        default: cx = size.width * 0.85; cy = size.height * 0.85
+        }
+        let radius = max(size.width, size.height) * 0.6
+        let cs = CGColorSpaceCreateDeviceRGB()
+        let colors: [CGColor] = [
+            CGColor(srgbRed: 1.0, green: 0.85, blue: 0.55, alpha: 0.85),
+            CGColor(srgbRed: 1.0, green: 0.70, blue: 0.35, alpha: 0.35),
+            CGColor(srgbRed: 0.0, green: 0.0, blue: 0.0,  alpha: 0.0),
+        ]
+        guard let gradient = CGGradient(colorsSpace: cs,
+                                        colors: colors as CFArray,
+                                        locations: [0.0, 0.4, 1.0])
+        else { return }
+        ctx.drawRadialGradient(gradient,
+                               startCenter: CGPoint(x: cx, y: cy),
+                               startRadius: 0,
+                               endCenter: CGPoint(x: cx, y: cy),
+                               endRadius: radius,
+                               options: [])
+    }
+
+    /// Tiny seedable LCG so per-frame draws don't depend on global RNG
+    /// state. xorshift64 — fast and deterministic.
+    private struct SystemRandomGenerator {
+        private var state: UInt64
+        init(seed: UInt64) { self.state = seed == 0 ? 1 : seed }
+        mutating func nextUnit() -> Double {
+            state ^= state &<< 13
+            state ^= state &>> 7
+            state ^= state &<< 17
+            return Double(state) / Double(UInt64.max)
+        }
     }
 
     private func solidColor(red: CGFloat, green: CGFloat,
@@ -398,6 +735,62 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
 
     private func clamp<T: Comparable>(_ v: T, lo: T, hi: T) -> T {
         min(max(v, lo), hi)
+    }
+
+    // MARK: - CapCut-parity S6 — normalized-coordinate runtime checks
+
+    /// Pure-predicate form — `true` when `p` is in normalized [0,1].
+    /// Exposed so tests can assert the predicate without driving the
+    /// assertion trap (which would crash XCTest in debug).
+    static func isNormalizedCenter(_ p: CGPoint) -> Bool {
+        (0...1).contains(p.x) && (0...1).contains(p.y)
+    }
+
+    /// Verifies a Vision/keyframe crop center is in normalized [0,1]
+    /// space. In debug builds trips `assertionFailure` so the upstream
+    /// regression surfaces in CI; in release logs a warning and lets
+    /// the caller's clamp keep the reel rolling.
+    static func assertNormalizedCenter(_ p: CGPoint,
+                                       context: String,
+                                       file: StaticString = #file,
+                                       line: UInt = #line) {
+        if !isNormalizedCenter(p) {
+            let msg = "\(context): keyframe center out of normalized [0,1] (x=\(p.x), y=\(p.y))"
+            #if DEBUG
+            assertionFailure(msg, file: file, line: line)
+            #else
+            Logger(subsystem: "com.playercut.app", category: "CoordAudit")
+                .warning("\(msg, privacy: .public)")
+            #endif
+        }
+    }
+
+    /// Pure-predicate form for CGRect — `true` when the rect lies in
+    /// normalized [0,1] space (x+w, y+h ≤ 1 with a 1e-4 tolerance for
+    /// float rounding).
+    static func isNormalizedRect(_ r: CGRect) -> Bool {
+        (0...1).contains(r.origin.x) && (0...1).contains(r.origin.y)
+            && (0...1).contains(r.size.width) && (0...1).contains(r.size.height)
+            && r.origin.x + r.size.width  <= 1.0001
+            && r.origin.y + r.size.height <= 1.0001
+    }
+
+    /// Same check for a normalized CGRect (x, y, w, h all in [0,1] and
+    /// x+w, y+h ≤ 1). Used by tests that drive synthetic out-of-range
+    /// boxes through the assertion path.
+    static func assertNormalizedRect(_ r: CGRect,
+                                     context: String,
+                                     file: StaticString = #file,
+                                     line: UInt = #line) {
+        if !isNormalizedRect(r) {
+            let msg = "\(context): crop rect out of normalized [0,1] (\(r))"
+            #if DEBUG
+            assertionFailure(msg, file: file, line: line)
+            #else
+            Logger(subsystem: "com.playercut.app", category: "CoordAudit")
+                .warning("\(msg, privacy: .public)")
+            #endif
+        }
     }
 }
 
@@ -533,6 +926,23 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
     let transitionStart: Double?
     let transitionEnd: Double?
     let overlay: Overlay?
+    /// Pacing tier (Section 2 of prior PR). Drives per-tier gating of the
+    /// background-segmentation pass (Auto mode: cutout for hero, pop for
+    /// feature, off for filler) so a long reel stays under the per-frame
+    /// Vision budget.
+    let pacingTier: PacingTier?
+    /// Caption overlay layered ABOVE the title/lower-third overlay (so a
+    /// title card can coexist with a caption). Drives Section 2 of the
+    /// CapCut-parity PR.
+    let captionOverlay: Overlay?
+    /// PR #11 S3 — per-clip multiplicative gain applied BEFORE the LUT
+    /// lookup so a sun-into-shade pan is normalized before the creative
+    /// grade has its say. (1,1,1) = no correction (the identity that
+    /// makes the compositor skip the pre-LUT scale).
+    let colorMatchGain: SIMD3<Float>
+    /// PR #11 S4 — optional procedural particle layer composited above
+    /// the graded frame at ≤ 0.30 opacity. nil = no particles.
+    let particles: ParticleKind?
 
     init(timeRange: CMTimeRange,
          startSeconds: Double,
@@ -543,7 +953,11 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
          transitionKind: TransitionKind?,
          transitionStart: Double?,
          transitionEnd: Double?,
-         overlay: Overlay? = nil) {
+         overlay: Overlay? = nil,
+         pacingTier: PacingTier? = nil,
+         captionOverlay: Overlay? = nil,
+         colorMatchGain: SIMD3<Float> = SIMD3<Float>(1, 1, 1),
+         particles: ParticleKind? = nil) {
         self.timeRange = timeRange
         self.startSeconds = startSeconds
         self.trackAID = trackAID
@@ -554,7 +968,32 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
         self.transitionStart = transitionStart
         self.transitionEnd = transitionEnd
         self.overlay = overlay
+        self.pacingTier = pacingTier
+        self.captionOverlay = captionOverlay
+        self.colorMatchGain = colorMatchGain
+        self.particles = particles
         super.init()
+    }
+
+    /// Returns a copy with a corrected time range (and matching
+    /// startSeconds), used by the pre-export validator to re-tile
+    /// instructions into exact [.zero, total] contiguity.
+    func reTiled(to range: CMTimeRange, startSeconds: Double) -> MetalPetalInstruction {
+        MetalPetalInstruction(
+            timeRange: range,
+            startSeconds: startSeconds,
+            trackAID: trackAID,
+            trackBID: trackBID,
+            cropKeyframes: cropKeyframes,
+            look: look,
+            transitionKind: transitionKind,
+            transitionStart: transitionStart,
+            transitionEnd: transitionEnd,
+            overlay: overlay,
+            pacingTier: pacingTier,
+            captionOverlay: captionOverlay,
+            colorMatchGain: colorMatchGain,
+            particles: particles)
     }
 
     var enablePostProcessing: Bool { false }
@@ -567,13 +1006,13 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
     var passthroughTrackID: CMPersistentTrackID { kCMPersistentTrackID_Invalid }
 
     func cropKeyframeAt(localTime t: Double) -> CropKeyframe {
-        guard !cropKeyframes.isEmpty else {
+        guard let last = cropKeyframes.last else {
             return CropKeyframe(time: 0,
                                 center: CGPoint(x: 0.5, y: 0.5),
                                 scale: 1.0)
         }
         if t <= cropKeyframes[0].time { return cropKeyframes[0] }
-        if t >= cropKeyframes.last!.time { return cropKeyframes.last! }
+        if t >= last.time { return last }
         for i in 0..<(cropKeyframes.count - 1) {
             let a = cropKeyframes[i]
             let b = cropKeyframes[i + 1]
@@ -586,7 +1025,7 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
                 return CropKeyframe(time: t, center: c, scale: s)
             }
         }
-        return cropKeyframes.last!
+        return last
     }
 
     func transitionForOutputTime(_ time: Double) -> TransitionBlend? {

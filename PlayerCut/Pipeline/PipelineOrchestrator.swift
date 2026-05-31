@@ -45,6 +45,13 @@ actor PipelineOrchestrator {
         }
     }
 
+    /// Persisted status of a game, or nil if it's gone. Lets the
+    /// background queue purge permanently-failed (poison) games instead of
+    /// retrying — and re-logging — them every launch.
+    func gameStatus(id: UUID) async -> GameStatus? {
+        (try? await store.game(id: id))?.status
+    }
+
     enum Progress: Sendable {
         case stage1Started
         case stage1Completed(candidateCount: Int)
@@ -114,6 +121,47 @@ actor PipelineOrchestrator {
                     await DiagnosticsStore.shared.recordEnum(
                         .reelLength,
                         value: game.reelLengthOverride ?? player.reelLengthPreference)
+                    // Templates — resolve the per-player or system-default
+                    // template, then overlay its pacing / extras onto the
+                    // user's ReelSettings so EditPlanBuilder + ReelComposer
+                    // pick them up via their existing `.current` reads.
+                    let baseSettings = ReelSettings.current
+                    let resolvedTemplate = await MainActor.run {
+                        TemplateRegistry.shared.resolve(
+                            playerDefaultID: player.defaultTemplateID,
+                            settingsSelectedID: baseSettings.selectedTemplateID.isEmpty
+                                ? nil : baseSettings.selectedTemplateID)
+                    }
+                    if let t = resolvedTemplate {
+                        self.log.info("Template active: \(t.id, privacy: .public) (\(t.displayName, privacy: .public))")
+                    }
+                    let settings = baseSettings.applying(resolvedTemplate)
+
+                    // CapCut-parity S5 — resolve sceneType from the user's
+                    // override (Settings → Stage 1 debug) or from a 4-frame
+                    // VNClassifyImageRequest vote on the raw video. The
+                    // hardcoded `.outdoor` default set at capture is only
+                    // honored when both the override is .auto AND the
+                    // classifier abstains.
+                    switch settings.forceSceneType {
+                    case .indoor:  game.sceneType = .indoor
+                    case .outdoor: game.sceneType = .outdoor
+                    // Stadium is a marketing label for outdoor — SceneType
+                    // only has indoor/outdoor in the persisted enum. The
+                    // user-visible "stadium" option in Settings → Stage 1
+                    // collapses to .outdoor here; the downstream LUT picker
+                    // doesn't distinguish.
+                    case .stadium: game.sceneType = .outdoor
+                    case .auto:
+                        let classified = await SceneClassifier.classify(
+                            videoURL: game.rawVideoURL,
+                            sampleCount: 4)
+                        if classified != game.sceneType {
+                            self.log.info("SceneClassifier: \(game.sceneType.rawValue, privacy: .public) → \(classified.rawValue, privacy: .public)")
+                            game.sceneType = classified
+                        }
+                    }
+                    try await self.store.upsert(game)
                     await DiagnosticsStore.shared.recordEnum(
                         .sceneType,
                         value: game.sceneType)
@@ -229,15 +277,20 @@ actor PipelineOrchestrator {
                     let aspect = game.outputAspectOverride ?? player.outputAspect
                     let renderSize = aspect.renderSize(forLength: length)
                     let output = OutputSpec(size: renderSize, fps: 30)
-                    let style = EditStyle.defaultFor(
-                        musicVibe: player.musicVibe)
+                    // Per-game vibe (chosen on the pre-record sheet) beats
+                    // the player's stored default; drives BOTH the edit
+                    // style and the music pick.
+                    let vibe = game.musicVibeOverride ?? player.musicVibe
+                    let style = EditStyle.defaultFor(musicVibe: vibe)
                     let perfProfile = await DeviceClass.shared.editProfile()
                     let planBuildStart = Date()
                     let builder = EditPlanBuilder(
                         style: style,
                         output: output,
                         sourceDuration: videoDuration,
-                        profile: perfProfile)
+                        profile: perfProfile,
+                        settings: settings,
+                        template: resolvedTemplate)
                     // Music — picked per (player, vibe) with LRU
                     // rotation. The orchestrator's musicURL: nil arg
                     // means "let the library pick"; an explicit URL
@@ -247,7 +300,7 @@ actor PipelineOrchestrator {
                     let pickedTrack: MusicLibrary.Track? = await MainActor.run {
                         if musicURL != nil { return nil as MusicLibrary.Track? }
                         return MusicLibrary.shared.pick(
-                            vibe: player.musicVibe,
+                            vibe: vibe,
                             playerId: player.id,
                             length: length)
                     }
@@ -258,12 +311,42 @@ actor PipelineOrchestrator {
                     } else {
                         self.log.info("Music picked: \(pickedTrack?.id ?? "<override>", privacy: .public) bpm=\(finalMusicBPM ?? 0)")
                     }
-                    let editPlan = builder.build(
+                    var editPlan = builder.build(
                         from: plan,
                         player: player,
                         game: game,
                         musicURL: finalMusicURL,
                         musicBPM: finalMusicBPM)
+                    // PR #11 S3 — auto color match: sample each clip's
+                    // mid-frame mean RGB, compute reel-wide median, emit
+                    // per-clip gains capped at ±18%. Stamped onto each
+                    // ClipPlan so ReelComposer can hand them to the
+                    // compositor in the SAME render pass as the LUT.
+                    let gains = await ColorMatchAnalyzer.analyze(
+                        plan: editPlan, sourceURL: game.rawVideoURL)
+                    if var cold = editPlan.coldOpen, let g = gains[cold.id] {
+                        cold.colorMatchGain = SIMD3<Float>(g.r, g.g, g.b)
+                        editPlan.coldOpen = cold
+                    }
+                    editPlan.body = editPlan.body.map { clip in
+                        guard let g = gains[clip.id] else { return clip }
+                        var c = clip
+                        c.colorMatchGain = SIMD3<Float>(g.r, g.g, g.b)
+                        return c
+                    }
+                    // PR #11 S4 — opt-in particle layer from the active
+                    // template. Same render pass; nil = no particle layer.
+                    if let particleKind = resolvedTemplate?.extras?.particles {
+                        if var cold = editPlan.coldOpen {
+                            cold.particles = particleKind
+                            editPlan.coldOpen = cold
+                        }
+                        editPlan.body = editPlan.body.map { clip in
+                            var c = clip
+                            c.particles = particleKind
+                            return c
+                        }
+                    }
                     await DiagnosticsStore.shared.recordDuration(
                         .composePlan,
                         seconds: Date().timeIntervalSince(planBuildStart))

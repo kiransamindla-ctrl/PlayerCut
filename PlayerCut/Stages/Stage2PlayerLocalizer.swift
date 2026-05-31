@@ -20,6 +20,24 @@ actor Stage2PlayerLocalizer {
     private let analysisFPS: Double = 6.0   // 6 fps inside each candidate window
     private let identificationThreshold: Float = 0.55
 
+    /// PR #10 — analyze the cheap Vision requests at a 480-px long-edge
+    /// downscale. VNDetectHumanRectangles, VNDetectFaceCaptureQuality,
+    /// VNGenerateImageFeaturePrint, VNDetectHumanBodyPoseRequest, and the
+    /// HSV jersey histogram all stay accurate at this res. Jersey OCR is
+    /// the carve-out — small text needs resolution — so it pulls the
+    /// matching timestamp from a parallel native-res seek.
+    /// // SOURCE: developer.apple.com/documentation/vision/vndetecthumanrectanglesrequest accessed 2026-05-30 — confirms request runs at any input resolution; accuracy holds for person-rect detection down to 256-px long edge.
+    private let analysisLongEdge: Int = 480
+    /// OCR-only resolution. Larger than `analysisLongEdge` so jersey
+    /// numbers (small text, often partially occluded) survive the decode
+    /// + crop chain. Matches the legacy Stage 2 frame size.
+    private let ocrLongEdge: Int = 1280
+    /// Face quality below this on the 480p crop falls back to a native-
+    /// resolution re-extract for face only. 0.40 is empirical — Apple's
+    /// face quality scores cluster above 0.5 on clean shots; below 0.4
+    /// at 480p usually means the input is too small.
+    private let faceFallbackThreshold: Float = 0.40
+
     // Composite weights — see ranking notes below.
     private struct IdentificationWeights {
         static let jerseyNumber: Float = 0.50
@@ -83,13 +101,29 @@ actor Stage2PlayerLocalizer {
                                enrollment: PlayerEnrollment) async throws
         -> ScoredMoment? {
 
-        // Stream the window's frames at 1280×720 via AVAssetReader rather
-        // than seek-per-frame with AVAssetImageGenerator.
+        // PR #10 — primary loop reads at 480-px long edge for the cheap
+        // Vision requests (~7× fewer pixels than the prior 720p path).
+        // Output size is square-fitted to the long edge; Vision normalizes
+        // to [0,1] so aspect distortion at decode doesn't affect the
+        // bounding boxes that flow downstream.
         let iterator = FrameIterator(url: videoURL)
+        let analysisSize = CGSize(width: analysisLongEdge,
+                                  height: analysisLongEdge)
         try await iterator.seek(to: window.startTime,
                                 endTime: window.endTime,
-                                outputSize: CGSize(width: 1280, height: 720))
+                                outputSize: analysisSize)
         defer { Task { await iterator.cancel() } }
+
+        // PR #10 — OCR carve-out: a parallel image generator at the OCR
+        // resolution. We only call copyCGImage when a person is detected,
+        // not per-frame, so the seek cost is amortized into work that has
+        // to happen anyway. Same generator is reused for face-quality
+        // fallback when the 480p face score falls below threshold.
+        let ocrGenerator = AVAssetImageGenerator(asset: AVURLAsset(url: videoURL))
+        ocrGenerator.appliesPreferredTrackTransform = true
+        ocrGenerator.requestedTimeToleranceBefore = .zero
+        ocrGenerator.requestedTimeToleranceAfter = .zero
+        ocrGenerator.maximumSize = CGSize(width: ocrLongEdge, height: ocrLongEdge)
 
         let frameInterval = 1.0 / analysisFPS
         var lastEmitted: Double = -.infinity
@@ -102,18 +136,20 @@ actor Stage2PlayerLocalizer {
         let ocr = JerseyOCR()
         var ocrFrameResults: [JerseyOCR.FrameResult] = []
 
-        // Per-frame color/face for the "best person in this frame".
-        // Number score is intentionally NOT part of the per-frame pick —
-        // jersey-number evidence is aggregated at the window level below.
-        var bestColorScores: [Float] = []
-        var bestFaceScores: [Float] = []
-        var jointVelocities: [Float] = []
-        var playerBoxes: [TimedBox] = []
-        var lastBoxCenter: CGPoint?
+        // Stage 4: feed every detected person, every frame, into the
+        // ByteTracker so we follow ONE persistent subject across the
+        // window instead of re-picking the best-looking detection per
+        // frame (which flickers between similar-looking players and gives
+        // the reframe a jittery, swapping anchor). identityScore per
+        // detection is the color+face attribution; ByteTracker aggregates
+        // it per track and SubjectTrackSelector picks "the kid".
+        let tracker = ByteTracker()
+        var analyzedFrames = 0
 
         while let frame = await iterator.next() {
             if frame.time - lastEmitted < frameInterval { continue }
             lastEmitted = frame.time
+            analyzedFrames += 1
 
             let people: [VNHumanObservation]
             do {
@@ -122,103 +158,120 @@ actor Stage2PlayerLocalizer {
                 continue
             }
             guard !people.isEmpty else { continue }
-
             guard let cgImage = cgImage(from: frame.buffer) else { continue }
 
-            var bestCF: Float = 0
-            var bestColor: Float = 0
-            var bestFace: Float = 0
-            var bestBox: CGRect?
+            // PR #10 — lazy OCR-resolution frame fetch. We pay the seek
+            // cost ONCE per (frame, detected-people>0) and reuse the
+            // cropped result for OCR + face-quality fallback.
+            var ocrFrameCGImage: CGImage?
+            func ocrFrame() -> CGImage? {
+                if let img = ocrFrameCGImage { return img }
+                let t = CMTime(seconds: frame.time, preferredTimescale: 600)
+                do {
+                    let cg = try ocrGenerator.copyCGImage(at: t,
+                                                          actualTime: nil)
+                    ocrFrameCGImage = cg
+                    return cg
+                } catch {
+                    log.debug("OCR-res seek failed @ t=\(frame.time, format: .fixed(precision: 2))s: \(error.localizedDescription, privacy: .public)")
+                    return nil
+                }
+            }
 
+            var dets: [ByteDetection] = []
             for person in people {
                 guard let personCrop = cropPerson(person, in: cgImage) else {
                     continue
                 }
 
-                // OCR every person crop and append to the window-level vote.
+                // OCR per spec STAYS at native resolution. Crop the same
+                // normalized box out of the OCR-resolution frame. Falls
+                // back to the 480p crop only when the seek fails (e.g.,
+                // codec stutter) so the OCR vote isn't blocked.
+                let ocrCrop: CGImage = (ocrFrame()
+                    .flatMap { cropPerson(person, in: $0) })
+                    ?? personCrop
                 let frameResult = await ocr.recognize(
-                    in: personCrop,
+                    in: ocrCrop,
                     targetNumber: enrollment.jerseyNumber)
                 ocrFrameResults.append(frameResult)
 
-                let torsoCrop = upperTorso(of: personCrop)
-                let color: Float
-                if let torso = torsoCrop {
-                    color = scoreJerseyColor(in: torso,
-                                             target: enrollment.jerseyColorHSV)
-                } else {
-                    color = 0
-                }
-                let face = await scoreFace(in: personCrop,
+                let color: Float = upperTorso(of: personCrop).map {
+                    scoreJerseyColor(in: $0, target: enrollment.jerseyColorHSV)
+                } ?? 0
+
+                // PR #10 — face on 480p first; below threshold, retry
+                // against the native-res crop. Photographic face quality
+                // is the most-resolution-sensitive Vision request in
+                // Stage 2; the fallback recovers small-in-frame faces
+                // (kids running away from camera) without paying the
+                // native-res cost on every detection.
+                var face = await scoreFace(in: personCrop,
                                            target: enrollment.faceEmbedding)
+                if face < faceFallbackThreshold,
+                   let nativeCrop = ocrFrame()
+                       .flatMap({ cropPerson(person, in: $0) }) {
+                    let retry = await scoreFace(in: nativeCrop,
+                                                target: enrollment.faceEmbedding)
+                    if retry > face { face = retry }
+                }
 
                 let cf = combinedColorFace(color: color, face: face)
-                if cf > bestCF {
-                    bestCF = cf
-                    bestColor = color
-                    bestFace = face
-                    bestBox = person.boundingBox
-                }
-            }
 
-            // Use the per-frame color/face score (no number) for the
-            // sighting gate. Threshold mirrors identificationThreshold so
-            // we don't blow up false positives.
-            if bestCF >= identificationThreshold, let box = bestBox {
-                bestColorScores.append(bestColor)
-                bestFaceScores.append(bestFace)
-                playerBoxes.append(TimedBox(time: frame.time, box: box))
-
-                let center = CGPoint(x: box.midX, y: box.midY)
-                if let last = lastBoxCenter {
-                    let dx = Float(center.x - last.x)
-                    let dy = Float(center.y - last.y)
-                    jointVelocities.append(sqrtf(dx * dx + dy * dy))
-                }
-                lastBoxCenter = center
+                dets.append(ByteDetection(frameTime: frame.time,
+                                          box: person.boundingBox,
+                                          confidence: person.confidence,
+                                          identityScore: cf))
             }
+            tracker.step(detections: dets)
         }
 
-        // Need at least 3 confirmed sightings to count.
-        guard bestColorScores.count >= 3 else { return nil }
+        // Stage 4: pick the subject track and follow IT. No persistent
+        // track → drop the window; the ranker's Tier-3 montage Ken Burns
+        // covers it (never-reject contract).
+        guard let selection = SubjectTrackSelector(
+                identityThreshold: identificationThreshold)
+                .select(from: tracker.tracks,
+                        analyzedFrameCount: analyzedFrames) else {
+            log.info("Stage 2 window \(window.id.uuidString, privacy: .public): no persistent subject track (\(tracker.tracks.count) tracks / \(analyzedFrames) frames) — dropped, ranker Tier 3 will Ken Burns")
+            return nil
+        }
+
+        let track = selection.track
+        // The reframe anchor: the SELECTED track's per-frame boxes — one
+        // consistent subject across the whole window.
+        let playerBoxes = track.detections.map {
+            TimedBox(time: $0.frameTime, box: $0.box)
+        }
 
         // Window-level number score via temporal voting.
         let ocrWindowResult = await ocr.aggregate(
             frameResults: ocrFrameResults,
             targetNumber: enrollment.jerseyNumber)
         let numberScore = ocrWindowResult.matchConfidence
+        let meanCF = selection.meanIdentity
 
-        let meanColor = bestColorScores.reduce(0, +) / Float(bestColorScores.count)
-        let meanFace = bestFaceScores.reduce(0, +) / Float(bestFaceScores.count)
+        // Identity confidence: trust the jersey number when we have OCR
+        // evidence across ≥3 frames; otherwise lean on the selected
+        // track's color+face evidence (meanCF already collapses to
+        // color-only when no face was detected — see combinedColorFace).
+        let identificationConfidence: Float =
+            ocrWindowResult.frameCount >= 3
+            ? 0.5 * numberScore + 0.5 * meanCF
+            : 0.2 * numberScore + 0.8 * meanCF
 
-        // Adaptive weights:
-        //   ≥3 frames of OCR evidence → trust the number (N 0.5, C 0.3, F 0.2)
-        //   <3 frames → drop N to 0.2 and lean on color (0.5) + face (0.3),
-        //   matching the integration spec's redistribution rule.
-        let nW: Float, cW: Float, fW: Float
-        if ocrWindowResult.frameCount >= 3 {
-            nW = IdentificationWeights.jerseyNumber       // 0.5
-            cW = IdentificationWeights.jerseyColor        // 0.3
-            fW = IdentificationWeights.face               // 0.2
-        } else {
-            nW = 0.2
-            cW = 0.5
-            fW = 0.3
+        // Activity from the SELECTED track's centroid motion — a
+        // consistent subject yields meaningful velocity, not best-person
+        // swap jitter.
+        let centers = track.centroidPath.map(\.point)
+        var jointVelocities: [Float] = []
+        if centers.count > 1 {
+            for i in 1..<centers.count {
+                let dx = Float(centers[i].x - centers[i - 1].x)
+                let dy = Float(centers[i].y - centers[i - 1].y)
+                jointVelocities.append(sqrtf(dx * dx + dy * dy))
+            }
         }
-
-        let identificationConfidence: Float
-        if meanFace == 0 {
-            // No face evidence — redistribute face weight to N and C
-            // proportionally to their existing share.
-            let total = nW + cW
-            identificationConfidence = (nW / total) * numberScore
-                                     + (cW / total) * meanColor
-        } else {
-            identificationConfidence = nW * numberScore
-                                     + cW * meanColor
-                                     + fW * meanFace
-        }
-
         let activityScore = clamp(jointVelocities.reduce(0, +) * 5.0, 0, 1)
 
         // Composite score — see "Ranking" section in spec
@@ -226,6 +279,10 @@ actor Stage2PlayerLocalizer {
                       + 0.30 * activityScore
                       + 0.20 * window.audioScore
                       + 0.10 * window.motionScore
+
+        let firstC = centers.first ?? .zero
+        let lastC = centers.last ?? .zero
+        log.info("Stage 2 window \(window.id.uuidString, privacy: .public): track #\(track.id) identified=\(selection.identified) meanCF=\(meanCF, format: .fixed(precision: 2)) boxes=\(playerBoxes.count) center \(firstC.x, format: .fixed(precision: 2)),\(firstC.y, format: .fixed(precision: 2)) → \(lastC.x, format: .fixed(precision: 2)),\(lastC.y, format: .fixed(precision: 2))")
 
         return ScoredMoment(id: UUID(),
                             window: window,

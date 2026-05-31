@@ -23,6 +23,41 @@ struct SettingsView: View {
 
     @State private var presentingDiagnostics = false
 
+    // Section 1 — Reel Audio
+    @AppStorage(ReelSettingsKeys.includeGameAudio) private var includeGameAudio = true
+    @AppStorage(ReelSettingsKeys.musicLevelDb)     private var musicLevelDb: Double = -4.5
+    @AppStorage(ReelSettingsKeys.gameAudioLevelDb) private var gameAudioLevelDb: Double = -21
+    @AppStorage(ReelSettingsKeys.duckDepthDb)      private var duckDepthDb: Double = 6
+    @AppStorage(ReelSettingsKeys.gameAudioBoostDb) private var gameAudioBoostDb: Double = 5
+    // Section 2 — Reel Pacing
+    @AppStorage(ReelSettingsKeys.heroPacing)        private var heroPacing = true
+    @AppStorage(ReelSettingsKeys.numHeroClips)      private var numHeroClips = 1
+    @AppStorage(ReelSettingsKeys.heroDurationSec)   private var heroDurationSec: Double = 5
+    @AppStorage(ReelSettingsKeys.fillerDurationSec) private var fillerDurationSec: Double = 2.5
+    @AppStorage(ReelSettingsKeys.slowMoSpeed)       private var slowMoSpeed: Double = 0.4
+    // Section 3 — Reel Order
+    @AppStorage(ReelSettingsKeys.hookFirst) private var hookFirst = true
+    // CapCut-parity S1 — Background
+    @AppStorage(ReelSettingsKeys.backgroundMode)   private var backgroundModeRaw = BackgroundMode.auto.rawValue
+    @AppStorage(ReelSettingsKeys.forceSegAllClips) private var forceSegAllClips = false
+    @AppStorage(ReelSettingsKeys.showSegMask)      private var showSegMask = false
+    // CapCut-parity S2 — Captions
+    @AppStorage(ReelSettingsKeys.captionsEnabled)  private var captionsEnabled = true
+    @AppStorage(ReelSettingsKeys.captionLocale)    private var captionLocale = "auto"
+    @AppStorage(ReelSettingsKeys.captionPosition)  private var captionPositionRaw = CaptionPosition.bottom.rawValue
+    // CapCut-parity S5 — Stage 1 debug
+    @AppStorage(ReelSettingsKeys.forceSceneType)   private var forceSceneTypeRaw = SceneOverride.auto.rawValue
+    @AppStorage(ReelSettingsKeys.usePoseSignal)    private var usePoseSignal = true
+    // Templates — system-wide default ("" = system fallback, per-player
+    // default wins regardless).
+    @AppStorage(ReelSettingsKeys.selectedTemplateID) private var selectedTemplateID = ""
+    // BYO music — picker state + last error.
+    @State private var presentingMusicImport = false
+    @State private var musicImportError: String?
+    /// Refresh trigger — bumped after import/delete so the imported-tracks
+    /// list re-reads MusicImportManager (a non-observable @MainActor class).
+    @State private var musicLibraryRevision = 0
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -58,6 +93,270 @@ struct SettingsView: View {
                                         in: RoundedRectangle(cornerRadius: Theme.Radius.card))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("open-diagnostics")
+
+                        // Section 1 — Reel Audio
+                        sectionHeader("Reel audio")
+                        reelCard {
+                            Toggle("Include game audio", isOn: $includeGameAudio)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-include-game-audio")
+                            dbSlider(title: "Music level",
+                                     value: $musicLevelDb, in: -12 ... 0,
+                                     id: "reel-music-level")
+                            dbSlider(title: "Game audio level",
+                                     value: $gameAudioLevelDb, in: -30 ... -6,
+                                     id: "reel-game-audio-level")
+                            dbSlider(title: "Duck depth on hit",
+                                     value: $duckDepthDb, in: 3 ... 12,
+                                     id: "reel-duck-depth")
+                            dbSlider(title: "Game audio boost on hit",
+                                     value: $gameAudioBoostDb, in: 0 ... 9,
+                                     id: "reel-game-boost")
+                        }
+                        Text("A/B with music-only by turning Include game audio off.")
+                            .font(.pcCaption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
+
+                        // Section 2 — Reel Pacing
+                        sectionHeader("Reel pacing")
+                        reelCard {
+                            Toggle("Hero-emphasis pacing", isOn: $heroPacing)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-hero-pacing")
+                            Stepper(value: $numHeroClips, in: 1 ... 2) {
+                                HStack {
+                                    Text("Hero clips").font(.pcBody)
+                                        .foregroundStyle(Theme.textPrimary)
+                                    Spacer()
+                                    Text("\(numHeroClips)")
+                                        .font(.pcCaption.monospacedDigit())
+                                        .foregroundStyle(Theme.textSecondary)
+                                }
+                            }
+                            .accessibilityIdentifier("reel-num-hero")
+                            secSlider(title: "Hero clip duration",
+                                      value: $heroDurationSec, in: 3 ... 7,
+                                      unit: "s", id: "reel-hero-duration")
+                            secSlider(title: "Filler clip duration",
+                                      value: $fillerDurationSec, in: 1.5 ... 3.5,
+                                      unit: "s", id: "reel-filler-duration")
+                            secSlider(title: "Slow-mo speed",
+                                      value: $slowMoSpeed, in: 0.3 ... 0.6,
+                                      unit: "x", id: "reel-slowmo")
+                        }
+                        Text("Hero-emphasis gives the top play longer breathing room and slow-mo at the apex; uniform pacing keeps every clip the same.")
+                            .font(.pcCaption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
+
+                        // Section 3 — Reel Order
+                        sectionHeader("Reel order")
+                        reelCard {
+                            Toggle("Hook first (best play leads)",
+                                   isOn: $hookFirst)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-hook-first")
+                        }
+                        Text("With Hook first on, the strongest moment opens the reel. Turn it off to keep clips in chronological order.")
+                            .font(.pcCaption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
+
+                        // CapCut-parity S1 — Effects (background segmentation)
+                        sectionHeader("Effects")
+                        reelCard {
+                            Picker("Background style",
+                                   selection: $backgroundModeRaw) {
+                                ForEach(BackgroundMode.allCases, id: \.rawValue) { m in
+                                    Text(m.rawValue.capitalized).tag(m.rawValue)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("reel-bg-mode")
+                            Toggle("Force segmentation on every clip (debug)",
+                                   isOn: $forceSegAllClips)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-bg-force-all")
+                            Toggle("Show segmentation mask (debug)",
+                                   isOn: $showSegMask)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-bg-show-mask")
+                        }
+                        Text("Cutout puts the kid over a blurred plate. Pop pushes the grade only on the kid. Auto picks per clip.")
+                            .font(.pcCaption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
+
+                        // CapCut-parity S2 — Captions
+                        sectionHeader("Captions")
+                        reelCard {
+                            Toggle("Auto captions", isOn: $captionsEnabled)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("reel-captions-enabled")
+                            Picker("Position", selection: $captionPositionRaw) {
+                                ForEach(CaptionPosition.allCases, id: \.rawValue) { p in
+                                    Text(p.rawValue.capitalized).tag(p.rawValue)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .accessibilityIdentifier("reel-caption-position")
+                            HStack {
+                                Text("Locale").font(.pcBody)
+                                    .foregroundStyle(Theme.textPrimary)
+                                Spacer()
+                                TextField("auto", text: $captionLocale)
+                                    .multilineTextAlignment(.trailing)
+                                    .autocorrectionDisabled()
+                                    .accessibilityIdentifier("reel-caption-locale")
+                            }
+                        }
+                        Text("On-device speech recognition. \"auto\" uses the device locale; \"en-US\" / \"es-ES\" etc. force one.")
+                            .font(.pcCaption)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.horizontal, 4)
+
+                        // CapCut-parity S3 — Subscription
+                        sectionHeader("Subscription")
+                        reelCard {
+                            HStack {
+                                Text("Current plan").font(.pcBody)
+                                    .foregroundStyle(Theme.textPrimary)
+                                Spacer()
+                                Text(PricingGate.currentPlan.displayName)
+                                    .font(.pcCaption)
+                                    .foregroundStyle(Theme.textSecondary)
+                            }
+                            Button("Restore Purchases") {
+                                Task { _ = await StoreKitManager.shared.restorePurchases() }
+                            }
+                            .accessibilityIdentifier("subscription-restore")
+                            #if DEBUG
+                            Button("Reset free-trial counter (debug)") {
+                                PricingGate.resetFreeTrial()
+                            }
+                            .accessibilityIdentifier("subscription-reset-trial")
+                            Picker("Force plan (debug)", selection: Binding(
+                                get: { PricingGate.currentPlan.rawValue },
+                                set: { PricingGate.setPlan(PricingPlan(rawValue: $0) ?? .freeTrial) })) {
+                                ForEach(PricingPlan.allCases, id: \.rawValue) { p in
+                                    Text(p.displayName).tag(p.rawValue)
+                                }
+                            }
+                            .accessibilityIdentifier("subscription-force-plan")
+                            #endif
+                        }
+
+                        // CapCut-parity S5 — Stage 1 debug
+                        sectionHeader("Stage 1 debug")
+                        reelCard {
+                            Picker("Force scene type", selection: $forceSceneTypeRaw) {
+                                ForEach(SceneOverride.allCases, id: \.rawValue) { s in
+                                    Text(s.rawValue.capitalized).tag(s.rawValue)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("stage1-force-scene")
+                            Toggle("Use pose signal", isOn: $usePoseSignal)
+                                .tint(Theme.accent)
+                                .accessibilityIdentifier("stage1-use-pose")
+                        }
+
+                        // BYO music — UIDocumentPicker import, list, delete.
+                        sectionHeader("Your music")
+                        reelCard {
+                            Button {
+                                Haptic.tap()
+                                musicImportError = nil
+                                presentingMusicImport = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("Add your own track")
+                                    Spacer()
+                                }
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Theme.accent)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("music-import-add")
+
+                            if let err = musicImportError {
+                                Text(err)
+                                    .font(.pcCaption)
+                                    .foregroundStyle(.red)
+                            }
+
+                            let imports = MusicImportManager.shared.tracks
+                                .sorted(by: { $0.importedAt > $1.importedAt })
+                            if imports.isEmpty {
+                                Text("Imported tracks appear here.")
+                                    .font(.pcCaption)
+                                    .foregroundStyle(Theme.textSecondary)
+                            } else {
+                                ForEach(imports) { track in
+                                    HStack(spacing: 8) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(track.displayName)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(Theme.textPrimary)
+                                                .lineLimit(1)
+                                            HStack(spacing: 6) {
+                                                Text("IMPORTED")
+                                                    .font(.system(size: 9, weight: .bold))
+                                                    .tracking(0.5)
+                                                    .padding(.horizontal, 5)
+                                                    .padding(.vertical, 2)
+                                                    .background(Theme.accent.opacity(0.25),
+                                                                in: Capsule())
+                                                    .foregroundStyle(Theme.accent)
+                                                Text("\(track.vibe.displayName) · \(track.bpm.map { "\($0) BPM" } ?? "BPM ?")")
+                                                    .font(.pcCaption)
+                                                    .foregroundStyle(Theme.textSecondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        Button {
+                                            Haptic.tap()
+                                            MusicImportManager.shared.remove(id: track.id)
+                                            musicLibraryRevision += 1
+                                        } label: {
+                                            Image(systemName: "trash")
+                                                .foregroundStyle(.red)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityIdentifier("music-import-delete-\(track.id)")
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                            }
+                            Text("You are responsible for the licenses of any content you import. PlayerCut does not redistribute imported files.")
+                                .font(.pcCaption)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        .id(musicLibraryRevision)   // force re-eval after import
+
+                        // Templates — system-wide default template. Per-
+                        // player default lives on PlayerProfile (set from
+                        // the enrollment editor); this picker is the
+                        // global fallback when no player default is set.
+                        sectionHeader("Default template")
+                        reelCard {
+                            Picker("Template", selection: $selectedTemplateID) {
+                                Text("System default")
+                                    .tag("")
+                                ForEach(TemplateRegistry.shared.list()) { t in
+                                    Text(t.displayName).tag(t.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("settings-template-picker")
+                            Text("Used when the player has no per-profile default. Tap a tile on the pre-record sheet to override per game.")
+                                .font(.pcCaption)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+
                         Text("PlayerCut never stores your child's video. Reels live in your Photos. Raw recordings are deleted the moment the reel is made.")
                             .font(.pcCaption)
                             .foregroundStyle(Theme.textSecondary)
@@ -84,6 +383,21 @@ struct SettingsView: View {
             .sheet(isPresented: $presentingDiagnostics) {
                 DiagnosticsView()
             }
+            .sheet(isPresented: $presentingMusicImport) {
+                MusicImportPicker { pickedURL in
+                    presentingMusicImport = false
+                    guard let url = pickedURL else { return }
+                    Task { @MainActor in
+                        do {
+                            _ = try await MusicImportManager.shared
+                                .importTrack(from: url)
+                            musicLibraryRevision += 1
+                        } catch {
+                            musicImportError = error.localizedDescription
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -100,5 +414,53 @@ struct SettingsView: View {
         content()
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
+    }
+
+    // MARK: - Reel Audio / Pacing / Order helpers
+
+    @ViewBuilder
+    private func reelCard<Content: View>(@ViewBuilder _ content: () -> Content)
+        -> some View {
+        VStack(alignment: .leading, spacing: 14) { content() }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.bgCard,
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+    }
+
+    private func dbSlider(title: String,
+                          value: Binding<Double>,
+                          in range: ClosedRange<Double>,
+                          id: String) -> some View {
+        labeledSlider(title: title, value: value, in: range,
+                      format: "%.1f dB", id: id)
+    }
+
+    private func secSlider(title: String,
+                           value: Binding<Double>,
+                           in range: ClosedRange<Double>,
+                           unit: String,
+                           id: String) -> some View {
+        labeledSlider(title: title, value: value, in: range,
+                      format: "%.1f \(unit)", id: id)
+    }
+
+    private func labeledSlider(title: String,
+                               value: Binding<Double>,
+                               in range: ClosedRange<Double>,
+                               format: String,
+                               id: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).font(.pcBody).foregroundStyle(Theme.textPrimary)
+                Spacer()
+                Text(String(format: format, value.wrappedValue))
+                    .font(.pcCaption.monospacedDigit())
+                    .foregroundStyle(Theme.textSecondary)
+            }
+            Slider(value: value, in: range)
+                .tint(Theme.accent)
+                .accessibilityIdentifier(id)
+        }
     }
 }

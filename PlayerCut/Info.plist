@@ -33,6 +33,8 @@
 	<string>PlayerCut uses the microphone to find the most exciting moments and add game sound to your reel.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>PlayerCut saves your finished reel to your Photos. We only add — we never read your library.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>PlayerCut transcribes the game's audio on your phone to add captions to your reel. Speech recognition runs on-device and never leaves your phone.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>processing</string>

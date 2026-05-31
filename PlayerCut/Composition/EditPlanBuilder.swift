@@ -69,6 +69,14 @@ struct EditPlanBuilder {
     let profile: PerfProfile
     let style: EditStyle
     let output: OutputSpec
+    /// User-tunable reel knobs (pacing tiers, slow-mo, hook-first). Read
+    /// fresh from UserDefaults by default; tests can pass an override.
+    let settings: ReelSettings
+    /// Active reel template, when one is selected. Drives beat-snap
+    /// aggressiveness + slow-mo apex factor directly so the picked
+    /// preset is visible in the final edit. nil = use settings/profile
+    /// defaults (back-compat with the no-template callers).
+    let template: ReelTemplate?
 
     /// Source video duration (used to clamp cold-open / clip windows).
     let sourceDuration: Double
@@ -76,11 +84,34 @@ struct EditPlanBuilder {
     init(style: EditStyle,
          output: OutputSpec,
          sourceDuration: Double,
-         profile: PerfProfile = .highEnd) {
+         profile: PerfProfile = .highEnd,
+         settings: ReelSettings = .current,
+         template: ReelTemplate? = nil) {
         self.style = style
         self.output = output
         self.sourceDuration = sourceDuration
         self.profile = profile
+        self.settings = settings
+        self.template = template
+    }
+
+    // MARK: - Template-derived parameters
+
+    /// Slow-mo apex factor: template wins when set, else the perf
+    /// profile's default (which itself is a function of device tier).
+    /// `settings.slowMoSpeed` is used as a per-clip override in the
+    /// hero-pacing path below for back-compat.
+    private var resolvedApexFactor: Double {
+        template?.speedRamp?.apexFactor ?? profile.apexSpeedFactor
+    }
+
+    /// Beat-snap aggressiveness in [0,1]. 1.0 = hard snap to the nearest
+    /// beat (the prior behavior — that's why `nil` defaults to 1.0).
+    /// 0.0 = no snap (cut lands exactly on the energy anchor).
+    private var resolvedSnapAggressiveness: Double {
+        guard let t = template else { return 1.0 }
+        let raw = Double(t.beatSnapAggressiveness)
+        return min(1.0, max(0.0, raw))
     }
 
     func build(from plan: ReelPlan,
@@ -99,9 +130,22 @@ struct EditPlanBuilder {
            let idx = bodyMoments.firstIndex(where: { $0.moment.id == cold.id }) {
             bodyMoments.remove(at: idx)
         }
+
+        // Section 2: pacing tiers. Top numHeroClips by score become
+        // "hero" (long hold + slow-mo + apex freeze), the next ~30% are
+        // "feature" (standard), the rest "filler" (tight). When
+        // heroPacing is OFF every clip is .feature so the pre-existing
+        // uniform behavior is preserved.
+        let tiers = settings.heroPacing
+            ? assignTiers(to: bodyMoments,
+                          numHero: settings.numHeroClips)
+            : Dictionary(uniqueKeysWithValues:
+                bodyMoments.map { ($0.moment.id, PacingTier.feature) })
+
         let body = bodyMoments.enumerated().map { (i, sel) in
             buildBodyClip(from: sel,
-                          isLast: i == bodyMoments.count - 1)
+                          isLast: i == bodyMoments.count - 1,
+                          tier: tiers[sel.moment.id] ?? .feature)
         }
 
         // Beat grid: derive from BPM if available, else use a per-style
@@ -117,7 +161,20 @@ struct EditPlanBuilder {
         // (>130 BPM) snap to half-beats so the pacing doesn't feel
         // stiff. Cold open + cards are left unsnapped; the ramped
         // cold-open intentionally swallows the first downbeat.
-        let snappedBody = snapToBeats(body, bpm: bpm)
+        var snappedBody = snapToBeats(body, bpm: bpm)
+
+        // Section 3: hook-first. The strongest body clip leads — viewers
+        // drop off after 20-60 s on a sports reel, so we open with the
+        // hit. Rest stays chronological behind it. Gated on Settings →
+        // Reel Order so the user can A/B against the original ordering.
+        if settings.hookFirst, snappedBody.count > 1 {
+            if let topIdx = snappedBody.indices.max(by: {
+                snappedBody[$0].energy < snappedBody[$1].energy
+            }), topIdx != 0 {
+                let hook = snappedBody.remove(at: topIdx)
+                snappedBody.insert(hook, at: 0)
+            }
+        }
 
         let titleCard = makeTitleCard(player: player, game: game)
         let lowerThird = LowerThirdSpec(
@@ -167,31 +224,45 @@ struct EditPlanBuilder {
         let log = Logger(subsystem: "com.playercut.app", category: "BeatSnap")
         log.info("beat-snap: bpm=\(bpm, format: .fixed(precision: 1)) beat=\(beatPeriod, format: .fixed(precision: 3))s snapUnit=\(snapUnit, format: .fixed(precision: 3))s")
 
-        return clips.map { clip in
+        // HARD FLOORS — a snapped clip may NEVER drop below these, at any
+        // tempo. Below them the composition becomes degenerate and export
+        // dies with -11841 "Operation Stopped" (seen at 140 BPM × 10 clips
+        // where snapUnit is tiny). If a snap would violate a floor we keep
+        // the clip UNSNAPPED rather than trim it to death.
+        let minRenderedSeconds = 0.6   // shortest rendered clip we'll allow
+        let minSourceSeconds = 0.5     // shortest source slice we'll allow
+
+        return clips.enumerated().map { (i, clip) in
             let segments = clip.speedCurve.segments
-            // k = sum((fracEnd - fracStart) / factor)
-            // rendered = sourceDur * k
+            // k = sum((fracEnd - fracStart) / factor); rendered = sourceDur * k
             let k = segments.reduce(0.0) { acc, s in
                 acc + (s.sourceFractionEnd - s.sourceFractionStart)
                     / max(0.01, s.factor)
             }
             guard k > 0 else { return clip }
             let currentRendered = clip.sourceDuration * k
-            let beats = max(2.0,
-                            (currentRendered / snapUnit).rounded())
-            let targetRendered = beats * snapUnit
+            let beats = max(2.0, (currentRendered / snapUnit).rounded())
+            let hardSnapRendered = beats * snapUnit
+            // Aggressiveness 0..1 blends between the un-snapped current
+            // rendered duration (chronological cut on the energy anchor)
+            // and the hard-snapped value (lands on a beat). 1.0 ≡ prior
+            // behavior. 0.3 → mostly chronological with a slight bias
+            // toward the beat. 0.0 → no snap at all.
+            let aggro = resolvedSnapAggressiveness
+            let targetRendered = currentRendered + (hardSnapRendered - currentRendered) * aggro
             let newSourceDur = targetRendered / k
-            guard newSourceDur >= 1.0 else {
-                log.warning("beat-snap: skipping clip (sourceDur \(newSourceDur, format: .fixed(precision: 2))s < 1.0s after snap)")
-                return clip
-            }
-            // Don't extend past the original sourceEnd — only trim.
-            guard newSourceDur <= clip.sourceDuration else {
+
+            // Floor checks — keep unsnapped if any would be violated. Log the
+            // exact values so a tempo regression is debuggable, never generic.
+            guard targetRendered >= minRenderedSeconds,
+                  newSourceDur >= minSourceSeconds,
+                  newSourceDur <= clip.sourceDuration else {
+                log.warning("beat-snap clip \(i): UNSNAPPED — would break floor (rendered \(currentRendered, format: .fixed(precision: 2))→\(targetRendered, format: .fixed(precision: 2))s, src \(clip.sourceDuration, format: .fixed(precision: 2))→\(newSourceDur, format: .fixed(precision: 2))s, snapUnit \(snapUnit, format: .fixed(precision: 3))s, bpm \(bpm, format: .fixed(precision: 0)))")
                 return clip
             }
             var snapped = clip
             snapped.sourceEnd = clip.sourceStart + newSourceDur
-            log.info("beat-snap: \(currentRendered, format: .fixed(precision: 2))s → \(targetRendered, format: .fixed(precision: 2))s (\(Int(beats)) beats)")
+            log.info("beat-snap clip \(i): \(currentRendered, format: .fixed(precision: 2))s → \(targetRendered, format: .fixed(precision: 2))s (\(Int(beats)) beats)")
             return snapped
         }
     }
@@ -223,7 +294,8 @@ struct EditPlanBuilder {
         let crop = buildCropKeyframes(boxes: best.moment.playerBoundingBoxes,
                                       sourceStart: start,
                                       sourceEnd: end,
-                                      tighter: true)
+                                      tighter: true,
+                                      trackConfidence: best.moment.identificationConfidence)
 
         // Cold open is always slow-mo to milk the apex.
         let speed: SpeedCurve = style.allowsSpeedRamps
@@ -260,31 +332,112 @@ struct EditPlanBuilder {
     // MARK: - Body clips
 
     private func buildBodyClip(from sel: SelectedClip,
-                               isLast: Bool) -> ClipPlan {
+                               isLast: Bool,
+                               tier: PacingTier = .feature) -> ClipPlan {
         let e = energy(of: sel)
-        let crop = buildCropKeyframes(boxes: sel.moment.playerBoundingBoxes,
-                                      sourceStart: sel.clipStart,
-                                      sourceEnd: sel.clipEnd,
-                                      tighter: false)
 
-        let allowsRamp = style.allowsSpeedRamps
-            && Float(e) >= profile.speedRampEnergyThreshold
-        let speed: SpeedCurve = allowsRamp
-            ? rampedSpeedCurve(apexFraction: anchorFraction(in: sel),
-                               deepestFactor: profile.apexSpeedFactor)
-            : SpeedCurve.realTime
+        // Section 2: tier durations + slow-mo gating + apex freeze.
+        // Hero-emphasis pacing re-centers each clip on its action anchor
+        // with a tier-specific span; slow-mo (and the 0.3 s freeze) are
+        // RESTRICTED to hero so feature/filler clips stay tight.
+        let (clipStart, clipEnd) = recenterForTier(sel: sel, tier: tier)
+
+        let crop = buildCropKeyframes(boxes: sel.moment.playerBoundingBoxes,
+                                      sourceStart: clipStart,
+                                      sourceEnd: clipEnd,
+                                      tighter: tier == .hero,
+                                      trackConfidence: sel.moment.identificationConfidence)
+
+        // Slow-mo gating: hero-only when heroPacing is ON; otherwise the
+        // pre-existing energy-based trigger drives it.
+        let allowsRamp: Bool
+        let speed: SpeedCurve
+        if settings.heroPacing {
+            allowsRamp = (tier == .hero) && style.allowsSpeedRamps
+            // Template's apexFactor takes priority over settings.slowMoSpeed
+            // so the picked preset (e.g. aesthetic-slow 0.60 vs slowmo-
+            // cinematic 0.35) lands visibly in the rendered ramp.
+            let deepest = template?.speedRamp?.apexFactor ?? settings.slowMoSpeed
+            speed = allowsRamp
+                ? rampedSpeedCurve(apexFraction: anchorFraction(in: sel),
+                                   deepestFactor: deepest)
+                : .realTime
+        } else {
+            allowsRamp = style.allowsSpeedRamps
+                && Float(e) >= profile.speedRampEnergyThreshold
+            speed = allowsRamp
+                ? rampedSpeedCurve(apexFraction: anchorFraction(in: sel),
+                                   deepestFactor: resolvedApexFactor)
+                : .realTime
+        }
+        let freeze: Double = (settings.heroPacing && tier == .hero) ? 0.3 : 0
 
         let transition: TransitionKind = isLast
             ? .crossDissolve
             : pickTransition(for: Float(e))
 
         return ClipPlan(id: sel.moment.id,
-                        sourceStart: sel.clipStart,
-                        sourceEnd: sel.clipEnd,
+                        sourceStart: clipStart,
+                        sourceEnd: clipEnd,
                         cropKeyframes: crop,
                         speedCurve: speed,
                         outgoingTransition: transition,
-                        energy: Float(e))
+                        energy: Float(e),
+                        pacingTier: tier,
+                        freezeFrameSeconds: freeze)
+    }
+
+    // MARK: - Pacing tiers (Section 2)
+
+    /// Sorts body moments by composite score; the top `numHero` get
+    /// `.hero`, the next ~30 % `.feature`, the rest `.filler`.
+    private func assignTiers(to moments: [SelectedClip],
+                             numHero: Int) -> [UUID: PacingTier] {
+        guard !moments.isEmpty else { return [:] }
+        let sorted = moments.sorted {
+            $0.moment.compositeScore > $1.moment.compositeScore
+        }
+        var out: [UUID: PacingTier] = [:]
+        let heroCount = max(1, min(numHero, sorted.count))
+        let featureEnd = heroCount + max(1, Int((Double(sorted.count - heroCount) * 0.3).rounded()))
+        for (i, sel) in sorted.enumerated() {
+            if i < heroCount {
+                out[sel.moment.id] = .hero
+            } else if i < featureEnd {
+                out[sel.moment.id] = .feature
+            } else {
+                out[sel.moment.id] = .filler
+            }
+        }
+        return out
+    }
+
+    /// Tier-driven source span centered on the moment's action anchor.
+    /// Hero gets `settings.heroDurationSec` (long hold), feature ~3.5 s,
+    /// filler `settings.fillerDurationSec` (tight). When heroPacing is
+    /// OFF we leave the ranker's choice untouched.
+    private func recenterForTier(sel: SelectedClip,
+                                 tier: PacingTier) -> (Double, Double) {
+        guard settings.heroPacing else {
+            return (sel.clipStart, sel.clipEnd)
+        }
+        let target: Double
+        switch tier {
+        case .hero:    target = settings.heroDurationSec
+        case .feature: target = 3.5
+        case .filler:  target = settings.fillerDurationSec
+        }
+        let center = anchorTime(in: sel.moment) ?? sel.center
+        var start = center - target / 2
+        var end = center + target / 2
+        // Clamp inside the moment's available range so we don't read past
+        // where the ranker said the action actually lived.
+        let lo = sel.clipStart, hi = sel.clipEnd
+        if start < lo { end += (lo - start); start = lo }
+        if end > hi { start -= (end - hi); end = hi }
+        start = max(0, start)
+        end = min(sourceDuration, end)
+        return (start, max(start + 0.5, end))   // never drop below 0.5 s
     }
 
     // MARK: - Auto-reframe (Part 3A)
@@ -292,10 +445,24 @@ struct EditPlanBuilder {
     /// Critically-damped tracking of the player center, scaled so the
     /// player sits at ~45% of the output viewport height. Falls back to
     /// the source-frame center when no boxes are available.
+    /// PR #11 S2 — safe-margin padding around the tracked subject box.
+    /// 12 % means we frame the player as if they were 12 % bigger in
+    /// each dimension; the resulting crop scale leaves a margin on all
+    /// sides so the subject never hits the frame edge. Tighter framing
+    /// (hero clips) still respects the margin.
+    static let subjectSafeMarginFraction: Double = 0.12
+
+    /// PR #11 S2 — drop to Ken Burns when SubjectTrackSelector confidence
+    /// falls below this floor. Below 0.5 the tracker's pick is no better
+    /// than a random pixel, so a simulated camera move reads more
+    /// honestly than a jittery follow.
+    static let trackConfidenceFloor: Float = 0.5
+
     private func buildCropKeyframes(boxes: [TimedBox],
                                     sourceStart: Double,
                                     sourceEnd: Double,
-                                    tighter: Bool) -> [CropKeyframe] {
+                                    tighter: Bool,
+                                    trackConfidence: Float = 1.0) -> [CropKeyframe] {
         let duration = sourceEnd - sourceStart
         guard duration > 0 else { return [] }
         let hz = profile.cropKeyframeHz
@@ -307,34 +474,28 @@ struct EditPlanBuilder {
             $0.time >= sourceStart - 0.25 && $0.time <= sourceEnd + 0.25
         }
 
-        if local.isEmpty {
-            // No tracker boxes → no subject to follow. Apply Ken Burns
-            // (Section 3): each clip simulates camera motion so the
-            // reel doesn't look frozen, even on a room test with no
-            // identifiable player.
-            //
-            // Direction is rotated per-clip via a hash of sourceStart
-            // so consecutive clips alternate push-in / pull-back /
-            // pan-left / pan-right — never two of the same in a row
-            // for a typical pacing.
+        if local.isEmpty
+            || trackConfidence < Self.trackConfidenceFloor {
+            // No tracker boxes OR confidence below floor → simulated
+            // camera (Ken Burns). The low-confidence path produces a
+            // smoother result than chasing a noisy tracker pick; the
+            // 0.5s ramp-in is realized at compose time by the renderer's
+            // crossfade between consecutive clips (transitions own the
+            // hand-off, not the keyframe builder).
             return kenBurnsKeyframes(duration: duration,
                                      anchorTime: sourceStart,
                                      tighter: tighter)
         }
 
-        // Convert to (time-from-clip-start, center, scale).
+        // Convert to (time-from-clip-start, center, scale). Apply the
+        // 12 % safe margin by inflating the perceived box height before
+        // computing the desired scale — equivalent to framing the player
+        // at 45 % / (1 + margin) of the output height instead of 45 %.
+        let safeMarginScale = 1.0 + Self.subjectSafeMarginFraction
         let raw: [(Double, CGPoint, CGFloat)] = local.map { box in
             let t = box.time - sourceStart
             let c = CGPoint(x: box.box.midX, y: box.box.midY)
-            // Scale → keep the player at ~45% of output height. The
-            // crop window height is targetH; player-box height in
-            // normalized source coords is box.height. We want
-            // box.height * scale ≈ 0.45 (in output's normalized space)
-            // when accounting for the source/output aspect mismatch.
-            // For 9:16 from a 16:9 source the crop width is narrower
-            // than source width by factor 9/16. We approximate by
-            // clamping scale to a sensible band.
-            let h = max(0.06, Double(box.box.height))
+            let h = max(0.06, Double(box.box.height) * safeMarginScale)
             let desired = 0.45 / h
             let s = CGFloat(min(1.45, max(1.0, desired * (tighter ? 1.1 : 1.0))))
             return (t, c, s)
@@ -385,9 +546,19 @@ struct EditPlanBuilder {
     private func interpolateTarget(raw: [(Double, CGPoint, CGFloat)],
                                    atTime t: Double)
         -> (center: CGPoint, scale: CGFloat) {
-        // Find bracketing samples; linearly interpolate.
+        // Center uses linear interp (critical damping downstream takes
+        // out the linear-segment kinks). Scale uses cubic ease-in-out
+        // (smoothstep) so zoom-in / zoom-out across keyframe boundaries
+        // reads as a gentle ramp instead of a corner — kills the jerky-
+        // zoom failure mode the spec calls out for PR #11.
+        // // SOURCE: developer.apple.com/documentation/quartzcore/catransitionfunction
+        // // accessed 2026-05-31 — easeInEaseOut is the standard cubic
+        // // pacing curve UIKit / CoreAnimation use for "natural" motion.
+        guard let last = raw.last else {
+            return (CGPoint(x: 0.5, y: 0.5), 1.0)
+        }
         if t <= raw[0].0 { return (raw[0].1, raw[0].2) }
-        if t >= raw.last!.0 { return (raw.last!.1, raw.last!.2) }
+        if t >= last.0 { return (last.1, last.2) }
         for i in 0..<(raw.count - 1) {
             let a = raw[i]
             let b = raw[i + 1]
@@ -396,11 +567,12 @@ struct EditPlanBuilder {
                 let f = CGFloat((t - a.0) / span)
                 let c = CGPoint(x: a.1.x + (b.1.x - a.1.x) * f,
                                 y: a.1.y + (b.1.y - a.1.y) * f)
-                let s = a.2 + (b.2 - a.2) * f
+                let smooth = f * f * (3 - 2 * f)   // smoothstep: 3t² - 2t³
+                let s = a.2 + (b.2 - a.2) * smooth
                 return (c, s)
             }
         }
-        return (raw.last!.1, raw.last!.2)
+        return (last.1, last.2)
     }
 
     private func clamp<T: Comparable>(_ v: T, lo: T, hi: T) -> T {

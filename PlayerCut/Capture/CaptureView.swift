@@ -43,17 +43,22 @@ struct CaptureView: View {
     @Environment(\.dismiss) private var dismiss
 
     let player: PlayerEnrollment
+    /// Per-game choices made on the pre-record sheet.
+    let reelLength: ReelLength
+    let musicVibe: MusicVibe
 
-    @State private var sessionReelLength: ReelLength
     @State private var status: String = "Opening system camera…"
     @State private var working = false
 
     private let log = Logger(subsystem: "com.playercut.app",
                              category: "CaptureUI")
 
-    init(player: PlayerEnrollment) {
+    init(player: PlayerEnrollment,
+         reelLength: ReelLength,
+         musicVibe: MusicVibe) {
         self.player = player
-        _sessionReelLength = State(initialValue: player.reelLengthPreference)
+        self.reelLength = reelLength
+        self.musicVibe = musicVibe
     }
 
     var body: some View {
@@ -156,9 +161,9 @@ struct CaptureView: View {
             localReelFallbackURL: nil,
             status: .awaitingProcessing,
             triggerSource: .manual,
-            reelLengthOverride: sessionReelLength == player.reelLengthPreference
-                ? nil : sessionReelLength,
+            reelLengthOverride: reelLength,
             sceneType: .outdoor,
+            musicVibeOverride: musicVibe,
             captureRecipe: nil)
         await coordinator.didFinishRecording(game: game)
         await DiagnosticsStore.shared.increment(.gamesRecorded)
