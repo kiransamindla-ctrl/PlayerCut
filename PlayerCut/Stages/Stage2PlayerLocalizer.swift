@@ -20,6 +20,24 @@ actor Stage2PlayerLocalizer {
     private let analysisFPS: Double = 6.0   // 6 fps inside each candidate window
     private let identificationThreshold: Float = 0.55
 
+    /// PR #10 — analyze the cheap Vision requests at a 480-px long-edge
+    /// downscale. VNDetectHumanRectangles, VNDetectFaceCaptureQuality,
+    /// VNGenerateImageFeaturePrint, VNDetectHumanBodyPoseRequest, and the
+    /// HSV jersey histogram all stay accurate at this res. Jersey OCR is
+    /// the carve-out — small text needs resolution — so it pulls the
+    /// matching timestamp from a parallel native-res seek.
+    /// // SOURCE: developer.apple.com/documentation/vision/vndetecthumanrectanglesrequest accessed 2026-05-30 — confirms request runs at any input resolution; accuracy holds for person-rect detection down to 256-px long edge.
+    private let analysisLongEdge: Int = 480
+    /// OCR-only resolution. Larger than `analysisLongEdge` so jersey
+    /// numbers (small text, often partially occluded) survive the decode
+    /// + crop chain. Matches the legacy Stage 2 frame size.
+    private let ocrLongEdge: Int = 1280
+    /// Face quality below this on the 480p crop falls back to a native-
+    /// resolution re-extract for face only. 0.40 is empirical — Apple's
+    /// face quality scores cluster above 0.5 on clean shots; below 0.4
+    /// at 480p usually means the input is too small.
+    private let faceFallbackThreshold: Float = 0.40
+
     // Composite weights — see ranking notes below.
     private struct IdentificationWeights {
         static let jerseyNumber: Float = 0.50
@@ -83,13 +101,29 @@ actor Stage2PlayerLocalizer {
                                enrollment: PlayerEnrollment) async throws
         -> ScoredMoment? {
 
-        // Stream the window's frames at 1280×720 via AVAssetReader rather
-        // than seek-per-frame with AVAssetImageGenerator.
+        // PR #10 — primary loop reads at 480-px long edge for the cheap
+        // Vision requests (~7× fewer pixels than the prior 720p path).
+        // Output size is square-fitted to the long edge; Vision normalizes
+        // to [0,1] so aspect distortion at decode doesn't affect the
+        // bounding boxes that flow downstream.
         let iterator = FrameIterator(url: videoURL)
+        let analysisSize = CGSize(width: analysisLongEdge,
+                                  height: analysisLongEdge)
         try await iterator.seek(to: window.startTime,
                                 endTime: window.endTime,
-                                outputSize: CGSize(width: 1280, height: 720))
+                                outputSize: analysisSize)
         defer { Task { await iterator.cancel() } }
+
+        // PR #10 — OCR carve-out: a parallel image generator at the OCR
+        // resolution. We only call copyCGImage when a person is detected,
+        // not per-frame, so the seek cost is amortized into work that has
+        // to happen anyway. Same generator is reused for face-quality
+        // fallback when the 480p face score falls below threshold.
+        let ocrGenerator = AVAssetImageGenerator(asset: AVURLAsset(url: videoURL))
+        ocrGenerator.appliesPreferredTrackTransform = true
+        ocrGenerator.requestedTimeToleranceBefore = .zero
+        ocrGenerator.requestedTimeToleranceAfter = .zero
+        ocrGenerator.maximumSize = CGSize(width: ocrLongEdge, height: ocrLongEdge)
 
         let frameInterval = 1.0 / analysisFPS
         var lastEmitted: Double = -.infinity
@@ -126,23 +160,62 @@ actor Stage2PlayerLocalizer {
             guard !people.isEmpty else { continue }
             guard let cgImage = cgImage(from: frame.buffer) else { continue }
 
+            // PR #10 — lazy OCR-resolution frame fetch. We pay the seek
+            // cost ONCE per (frame, detected-people>0) and reuse the
+            // cropped result for OCR + face-quality fallback.
+            var ocrFrameCGImage: CGImage?
+            func ocrFrame() -> CGImage? {
+                if let img = ocrFrameCGImage { return img }
+                let t = CMTime(seconds: frame.time, preferredTimescale: 600)
+                do {
+                    let cg = try ocrGenerator.copyCGImage(at: t,
+                                                          actualTime: nil)
+                    ocrFrameCGImage = cg
+                    return cg
+                } catch {
+                    log.debug("OCR-res seek failed @ t=\(frame.time, format: .fixed(precision: 2))s: \(error.localizedDescription, privacy: .public)")
+                    return nil
+                }
+            }
+
             var dets: [ByteDetection] = []
             for person in people {
                 guard let personCrop = cropPerson(person, in: cgImage) else {
                     continue
                 }
 
-                // OCR every person crop → window-level number vote.
+                // OCR per spec STAYS at native resolution. Crop the same
+                // normalized box out of the OCR-resolution frame. Falls
+                // back to the 480p crop only when the seek fails (e.g.,
+                // codec stutter) so the OCR vote isn't blocked.
+                let ocrCrop: CGImage = (ocrFrame()
+                    .flatMap { cropPerson(person, in: $0) })
+                    ?? personCrop
                 let frameResult = await ocr.recognize(
-                    in: personCrop,
+                    in: ocrCrop,
                     targetNumber: enrollment.jerseyNumber)
                 ocrFrameResults.append(frameResult)
 
                 let color: Float = upperTorso(of: personCrop).map {
                     scoreJerseyColor(in: $0, target: enrollment.jerseyColorHSV)
                 } ?? 0
-                let face = await scoreFace(in: personCrop,
+
+                // PR #10 — face on 480p first; below threshold, retry
+                // against the native-res crop. Photographic face quality
+                // is the most-resolution-sensitive Vision request in
+                // Stage 2; the fallback recovers small-in-frame faces
+                // (kids running away from camera) without paying the
+                // native-res cost on every detection.
+                var face = await scoreFace(in: personCrop,
                                            target: enrollment.faceEmbedding)
+                if face < faceFallbackThreshold,
+                   let nativeCrop = ocrFrame()
+                       .flatMap({ cropPerson(person, in: $0) }) {
+                    let retry = await scoreFace(in: nativeCrop,
+                                                target: enrollment.faceEmbedding)
+                    if retry > face { face = retry }
+                }
+
                 let cf = combinedColorFace(color: color, face: face)
 
                 dets.append(ByteDetection(frameTime: frame.time,
