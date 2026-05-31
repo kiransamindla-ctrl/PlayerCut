@@ -89,3 +89,27 @@ targets:
         TEST_TARGET_NAME: PlayerCut
         GENERATE_INFOPLIST_FILE: YES
         DEVELOPMENT_TEAM: NFA3VW6VKZ
+
+# Explicit scheme so test-time settings (coverage, sanitizers) are
+# under source control instead of auto-generated per-machine.
+schemes:
+  PlayerCut:
+    build:
+      targets:
+        PlayerCut: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      coverageTargets:
+        - PlayerCut
+      targets:
+        - PlayerCutTests
+        - PlayerCutUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
