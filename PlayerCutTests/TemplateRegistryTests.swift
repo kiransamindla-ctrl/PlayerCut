@@ -13,10 +13,10 @@ import XCTest
 @MainActor
 final class TemplateRegistryTests: XCTestCase {
 
-    func testAllSixStartingTemplatesLoad() throws {
+    func testAllTwelveTemplatesLoadFromManifest() throws {
         let templates = TemplateRegistry.shared.list()
-        XCTAssertEqual(templates.count, 6,
-                       "Templates.json must hold exactly 6 starting presets")
+        XCTAssertEqual(templates.count, 12,
+                       "Templates.json must hold exactly 12 presets after PR #11")
     }
 
     func testEachExpectedIDIsPresent() throws {
@@ -27,10 +27,60 @@ final class TemplateRegistryTests: XCTestCase {
             "trendy-transitions",
             "attitude-montage",
             "aesthetic-slow",
+            "epic-highlight",
+            "storytelling-narrative",
+            "viral-tiktok",
+            "cinematic-portrait",
+            "energy-montage",
+            "clean-social",
         ]
         let actual = Set(TemplateRegistry.shared.list().map { $0.id })
         XCTAssertEqual(actual, expected,
                        "missing or extra templates: \(actual.symmetricDifference(expected))")
+    }
+
+    // MARK: - PR #11 — per-template background mode + particle opt-in
+
+    func testEveryTemplateDeclaresBackgroundMode() throws {
+        for t in TemplateRegistry.shared.list() {
+            XCTAssertNotNil(t.extras?.backgroundMode,
+                            "template \(t.id) must declare extras.backgroundMode")
+        }
+    }
+
+    func testGlobalBackgroundSettingOverridesTemplateExceptInAuto() throws {
+        let aestheticSlow = try XCTUnwrap(
+            TemplateRegistry.shared.get(id: "aesthetic-slow"))
+        XCTAssertEqual(aestheticSlow.extras?.backgroundMode, .pop)
+
+        // Global = .auto → template wins.
+        var s = ReelSettings.defaults
+        s.backgroundMode = .auto
+        let autoOverlay = s.applying(aestheticSlow)
+        XCTAssertEqual(autoOverlay.backgroundMode, .pop,
+                       "global .auto must honor template's .pop")
+
+        // Global = .off → global wins (user explicitly turned segmentation off).
+        s.backgroundMode = .off
+        let offOverlay = s.applying(aestheticSlow)
+        XCTAssertEqual(offOverlay.backgroundMode, .off,
+                       "global .off overrides template's per-template default")
+    }
+
+    func testParticleOptInRespectsTemplate() throws {
+        let viral = try XCTUnwrap(TemplateRegistry.shared.get(id: "viral-tiktok"))
+        XCTAssertEqual(viral.extras?.particles, .sparkle)
+        let portrait = try XCTUnwrap(TemplateRegistry.shared.get(id: "cinematic-portrait"))
+        XCTAssertEqual(portrait.extras?.particles, .filmGrain)
+        let aesthetic = try XCTUnwrap(TemplateRegistry.shared.get(id: "aesthetic-slow"))
+        XCTAssertEqual(aesthetic.extras?.particles, .dust)
+        // The other 9 templates declare nil particles.
+        for t in TemplateRegistry.shared.list()
+        where !["viral-tiktok", "cinematic-portrait", "aesthetic-slow"]
+                .contains(t.id) {
+            XCTAssertNil(t.extras?.particles,
+                         "template \(t.id) should ship no particles")
+        }
     }
 
     func testSystemDefaultResolves() throws {
@@ -87,12 +137,16 @@ final class TemplateRegistryTests: XCTestCase {
             XCTFail("aesthetic-slow template missing")
             return
         }
-        let base = ReelSettings.defaults
+        // PR #11 — to receive the template's backgroundMode override the
+        // global setting must be .auto (the new precedence rule). The
+        // pacing fields always overlay regardless of global state.
+        var base = ReelSettings.defaults
+        base.backgroundMode = .auto
         let overlaid = base.applying(t)
         XCTAssertEqual(overlaid.heroDurationSec, t.pacingTiers.heroDurationSec)
         XCTAssertEqual(overlaid.fillerDurationSec, t.pacingTiers.fillerDurationSec)
-        // aesthetic-slow forces backgroundMode = .pop in its extras.
-        XCTAssertEqual(overlaid.backgroundMode, .pop)
+        XCTAssertEqual(overlaid.backgroundMode, .pop,
+                       "aesthetic-slow's backgroundMode .pop must apply under global .auto")
     }
 
     func testReelSettingsApplyingNilTemplateIsIdentity() throws {

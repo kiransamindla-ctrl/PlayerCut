@@ -294,7 +294,8 @@ struct EditPlanBuilder {
         let crop = buildCropKeyframes(boxes: best.moment.playerBoundingBoxes,
                                       sourceStart: start,
                                       sourceEnd: end,
-                                      tighter: true)
+                                      tighter: true,
+                                      trackConfidence: best.moment.identificationConfidence)
 
         // Cold open is always slow-mo to milk the apex.
         let speed: SpeedCurve = style.allowsSpeedRamps
@@ -344,7 +345,8 @@ struct EditPlanBuilder {
         let crop = buildCropKeyframes(boxes: sel.moment.playerBoundingBoxes,
                                       sourceStart: clipStart,
                                       sourceEnd: clipEnd,
-                                      tighter: tier == .hero)
+                                      tighter: tier == .hero,
+                                      trackConfidence: sel.moment.identificationConfidence)
 
         // Slow-mo gating: hero-only when heroPacing is ON; otherwise the
         // pre-existing energy-based trigger drives it.
@@ -443,10 +445,24 @@ struct EditPlanBuilder {
     /// Critically-damped tracking of the player center, scaled so the
     /// player sits at ~45% of the output viewport height. Falls back to
     /// the source-frame center when no boxes are available.
+    /// PR #11 S2 — safe-margin padding around the tracked subject box.
+    /// 12 % means we frame the player as if they were 12 % bigger in
+    /// each dimension; the resulting crop scale leaves a margin on all
+    /// sides so the subject never hits the frame edge. Tighter framing
+    /// (hero clips) still respects the margin.
+    static let subjectSafeMarginFraction: Double = 0.12
+
+    /// PR #11 S2 — drop to Ken Burns when SubjectTrackSelector confidence
+    /// falls below this floor. Below 0.5 the tracker's pick is no better
+    /// than a random pixel, so a simulated camera move reads more
+    /// honestly than a jittery follow.
+    static let trackConfidenceFloor: Float = 0.5
+
     private func buildCropKeyframes(boxes: [TimedBox],
                                     sourceStart: Double,
                                     sourceEnd: Double,
-                                    tighter: Bool) -> [CropKeyframe] {
+                                    tighter: Bool,
+                                    trackConfidence: Float = 1.0) -> [CropKeyframe] {
         let duration = sourceEnd - sourceStart
         guard duration > 0 else { return [] }
         let hz = profile.cropKeyframeHz
@@ -458,34 +474,28 @@ struct EditPlanBuilder {
             $0.time >= sourceStart - 0.25 && $0.time <= sourceEnd + 0.25
         }
 
-        if local.isEmpty {
-            // No tracker boxes → no subject to follow. Apply Ken Burns
-            // (Section 3): each clip simulates camera motion so the
-            // reel doesn't look frozen, even on a room test with no
-            // identifiable player.
-            //
-            // Direction is rotated per-clip via a hash of sourceStart
-            // so consecutive clips alternate push-in / pull-back /
-            // pan-left / pan-right — never two of the same in a row
-            // for a typical pacing.
+        if local.isEmpty
+            || trackConfidence < Self.trackConfidenceFloor {
+            // No tracker boxes OR confidence below floor → simulated
+            // camera (Ken Burns). The low-confidence path produces a
+            // smoother result than chasing a noisy tracker pick; the
+            // 0.5s ramp-in is realized at compose time by the renderer's
+            // crossfade between consecutive clips (transitions own the
+            // hand-off, not the keyframe builder).
             return kenBurnsKeyframes(duration: duration,
                                      anchorTime: sourceStart,
                                      tighter: tighter)
         }
 
-        // Convert to (time-from-clip-start, center, scale).
+        // Convert to (time-from-clip-start, center, scale). Apply the
+        // 12 % safe margin by inflating the perceived box height before
+        // computing the desired scale — equivalent to framing the player
+        // at 45 % / (1 + margin) of the output height instead of 45 %.
+        let safeMarginScale = 1.0 + Self.subjectSafeMarginFraction
         let raw: [(Double, CGPoint, CGFloat)] = local.map { box in
             let t = box.time - sourceStart
             let c = CGPoint(x: box.box.midX, y: box.box.midY)
-            // Scale → keep the player at ~45% of output height. The
-            // crop window height is targetH; player-box height in
-            // normalized source coords is box.height. We want
-            // box.height * scale ≈ 0.45 (in output's normalized space)
-            // when accounting for the source/output aspect mismatch.
-            // For 9:16 from a 16:9 source the crop width is narrower
-            // than source width by factor 9/16. We approximate by
-            // clamping scale to a sensible band.
-            let h = max(0.06, Double(box.box.height))
+            let h = max(0.06, Double(box.box.height) * safeMarginScale)
             let desired = 0.45 / h
             let s = CGFloat(min(1.45, max(1.0, desired * (tighter ? 1.1 : 1.0))))
             return (t, c, s)
@@ -536,7 +546,14 @@ struct EditPlanBuilder {
     private func interpolateTarget(raw: [(Double, CGPoint, CGFloat)],
                                    atTime t: Double)
         -> (center: CGPoint, scale: CGFloat) {
-        // Find bracketing samples; linearly interpolate.
+        // Center uses linear interp (critical damping downstream takes
+        // out the linear-segment kinks). Scale uses cubic ease-in-out
+        // (smoothstep) so zoom-in / zoom-out across keyframe boundaries
+        // reads as a gentle ramp instead of a corner — kills the jerky-
+        // zoom failure mode the spec calls out for PR #11.
+        // // SOURCE: developer.apple.com/documentation/quartzcore/catransitionfunction
+        // // accessed 2026-05-31 — easeInEaseOut is the standard cubic
+        // // pacing curve UIKit / CoreAnimation use for "natural" motion.
         if t <= raw[0].0 { return (raw[0].1, raw[0].2) }
         if t >= raw.last!.0 { return (raw.last!.1, raw.last!.2) }
         for i in 0..<(raw.count - 1) {
@@ -547,7 +564,8 @@ struct EditPlanBuilder {
                 let f = CGFloat((t - a.0) / span)
                 let c = CGPoint(x: a.1.x + (b.1.x - a.1.x) * f,
                                 y: a.1.y + (b.1.y - a.1.y) * f)
-                let s = a.2 + (b.2 - a.2) * f
+                let smooth = f * f * (3 - 2 * f)   // smoothstep: 3t² - 2t³
+                let s = a.2 + (b.2 - a.2) * smooth
                 return (c, s)
             }
         }

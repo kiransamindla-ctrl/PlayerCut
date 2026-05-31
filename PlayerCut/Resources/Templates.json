@@ -16,7 +16,9 @@
     "beatSnapAggressiveness": 1.0,
     "musicVibe": "energetic",
     "extras": {
-      "captionsEnabled": false
+      "captionsEnabled": false,
+      "backgroundMode": "off",
+      "particles": null
     }
   },
   {
@@ -38,7 +40,10 @@
     },
     "beatSnapAggressiveness": 0.5,
     "musicVibe": "cinematic",
-    "extras": null
+    "extras": {
+      "backgroundMode": "off",
+      "particles": null
+    }
   },
   {
     "id": "minimal-vlog",
@@ -57,7 +62,9 @@
     "beatSnapAggressiveness": 0.3,
     "musicVibe": "chill",
     "extras": {
-      "captionsEnabled": true
+      "captionsEnabled": true,
+      "backgroundMode": "off",
+      "particles": null
     }
   },
   {
@@ -79,7 +86,10 @@
     },
     "beatSnapAggressiveness": 0.9,
     "musicVibe": "energetic",
-    "extras": null
+    "extras": {
+      "backgroundMode": "cutout",
+      "particles": null
+    }
   },
   {
     "id": "attitude-montage",
@@ -101,7 +111,9 @@
     "beatSnapAggressiveness": 0.8,
     "musicVibe": "energetic",
     "extras": {
-      "captionsEnabled": true
+      "captionsEnabled": true,
+      "backgroundMode": "off",
+      "particles": null
     }
   },
   {
@@ -124,7 +136,150 @@
     "beatSnapAggressiveness": 0.4,
     "musicVibe": "chill",
     "extras": {
-      "backgroundMode": "pop"
+      "backgroundMode": "pop",
+      "particles": "dust"
+    }
+  },
+  {
+    "id": "epic-highlight",
+    "displayName": "Epic Highlight Reel",
+    "thumbnailAsset": "trophy.fill",
+    "lut": "punchy",
+    "lutBlend": 0.78,
+    "transitions": ["zoomPunch", "flash"],
+    "speedRamp": {
+      "apexFactor": 0.35,
+      "heroOnly": true
+    },
+    "pacingTiers": {
+      "heroDurationSec": 4.0,
+      "featureDurationSec": 3.0,
+      "fillerDurationSec": 2.0,
+      "heroFreezeSec": 0.3
+    },
+    "beatSnapAggressiveness": 0.9,
+    "musicVibe": "energetic",
+    "extras": {
+      "backgroundMode": "off",
+      "particles": null
+    }
+  },
+  {
+    "id": "storytelling-narrative",
+    "displayName": "Storytelling Narrative",
+    "thumbnailAsset": "book.fill",
+    "lut": "warm",
+    "lutBlend": 0.65,
+    "transitions": ["crossDissolve", "fadeFromBlack", "fadeToBlack"],
+    "speedRamp": null,
+    "pacingTiers": {
+      "heroDurationSec": 6.0,
+      "featureDurationSec": 4.0,
+      "fillerDurationSec": 3.0,
+      "heroFreezeSec": 0
+    },
+    "beatSnapAggressiveness": 0.4,
+    "musicVibe": "cinematic",
+    "extras": {
+      "captionsEnabled": true,
+      "backgroundMode": "off",
+      "particles": null
+    }
+  },
+  {
+    "id": "viral-tiktok",
+    "displayName": "Viral TikTok Style",
+    "thumbnailAsset": "music.note.tv.fill",
+    "lut": "vivid",
+    "lutBlend": 0.80,
+    "transitions": ["zoomPunch", "flash", "whipPan"],
+    "speedRamp": {
+      "apexFactor": 0.40,
+      "heroOnly": false
+    },
+    "pacingTiers": {
+      "heroDurationSec": 2.5,
+      "featureDurationSec": 2.0,
+      "fillerDurationSec": 1.5,
+      "heroFreezeSec": 0
+    },
+    "beatSnapAggressiveness": 1.0,
+    "musicVibe": "energetic",
+    "extras": {
+      "captionsEnabled": true,
+      "backgroundMode": "cutout",
+      "particles": "sparkle"
+    }
+  },
+  {
+    "id": "cinematic-portrait",
+    "displayName": "Cinematic Portrait",
+    "thumbnailAsset": "person.crop.rectangle.fill",
+    "lut": "warm",
+    "lutBlend": 0.70,
+    "transitions": ["crossDissolve"],
+    "speedRamp": {
+      "apexFactor": 0.50,
+      "heroOnly": true
+    },
+    "pacingTiers": {
+      "heroDurationSec": 5.0,
+      "featureDurationSec": 4.0,
+      "fillerDurationSec": 3.0,
+      "heroFreezeSec": 0
+    },
+    "beatSnapAggressiveness": 0.5,
+    "musicVibe": "cinematic",
+    "extras": {
+      "captionsEnabled": false,
+      "backgroundMode": "pop",
+      "particles": "film_grain"
+    }
+  },
+  {
+    "id": "energy-montage",
+    "displayName": "Energy Montage",
+    "thumbnailAsset": "bolt.fill",
+    "lut": "punchy",
+    "lutBlend": 0.75,
+    "transitions": ["flash", "zoomPunch"],
+    "speedRamp": {
+      "apexFactor": 0.40,
+      "heroOnly": false
+    },
+    "pacingTiers": {
+      "heroDurationSec": 3.0,
+      "featureDurationSec": 2.5,
+      "fillerDurationSec": 2.0,
+      "heroFreezeSec": 0
+    },
+    "beatSnapAggressiveness": 1.0,
+    "musicVibe": "energetic",
+    "extras": {
+      "backgroundMode": "off",
+      "particles": null
+    }
+  },
+  {
+    "id": "clean-social",
+    "displayName": "Clean Social",
+    "thumbnailAsset": "rectangle.portrait.fill",
+    "lut": "natural",
+    "lutBlend": 0.50,
+    "transitions": ["hardCut"],
+    "speedRamp": null,
+    "pacingTiers": {
+      "heroDurationSec": 4.0,
+      "featureDurationSec": 3.0,
+      "fillerDurationSec": 3.0,
+      "heroFreezeSec": 0
+    },
+    "beatSnapAggressiveness": 0.3,
+    "musicVibe": "chill",
+    "extras": {
+      "captionsEnabled": true,
+      "backgroundMode": "off",
+      "particles": null
     }
   }
 ]

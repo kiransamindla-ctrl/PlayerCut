@@ -201,7 +201,14 @@ struct ReelSettings: Equatable {
         copy.fillerDurationSec = t.pacingTiers.fillerDurationSec
         if let ext = t.extras {
             if let cap = ext.captionsEnabled { copy.captionsEnabled = cap }
-            if let bg  = ext.backgroundMode  { copy.backgroundMode  = bg  }
+            // PR #11 — backgroundMode precedence:
+            //   user-global ∈ {off, cutout, pop} → user wins (explicit choice).
+            //   user-global == .auto → template's declared mode wins.
+            // This lets a parent turn segmentation off globally for kids'
+            // content without having to fight per-template defaults.
+            if let bg = ext.backgroundMode, self.backgroundMode == .auto {
+                copy.backgroundMode = bg
+            }
         }
         return copy
     }

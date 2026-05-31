@@ -86,7 +86,44 @@ struct ReelTemplate: Codable, Identifiable, Equatable {
         /// is off; nil = honor global.
         var captionsEnabled: Bool?
         /// Override background segmentation mode for this template;
-        /// nil = honor ReelSettings.backgroundMode.
+        /// nil = honor ReelSettings.backgroundMode. When ReelSettings's
+        /// global mode is `.auto` the template's value is what actually
+        /// renders; other global modes (off / cutout / pop) win.
         var backgroundMode: BackgroundMode?
+        /// Optional subtle particle layer composited above the graded
+        /// frame. nil = no particles. Each kind ships its own
+        /// procedural texture (no extra bundled PNGs); opacity is
+        /// capped at 0.3 inside the compositor so particles never
+        /// obscure the subject.
+        var particles: ParticleKind?
+    }
+}
+
+/// Procedural particle overlay rendered as a single MetalPetal layer.
+/// Cases are encoded as raw strings in Templates.json so the JSON
+/// stays human-editable.
+enum ParticleKind: String, Codable, CaseIterable {
+    /// Bright micro-stars rotating slowly — used by "viral-tiktok".
+    case sparkle
+    /// Soft warm lens-flare bloom across one corner — opt-in for
+    /// "trendy-transitions" if the user enables it via Settings.
+    case lensFlare = "lens_flare"
+    /// 1970s film-stock grain — used by "cinematic-portrait".
+    case filmGrain = "film_grain"
+    /// Slow-falling dust motes in a warm key light — used by
+    /// "aesthetic-slow" (in addition to its background pop).
+    case dust
+
+    /// Final composite opacity applied to the procedural particle
+    /// texture. Capped at 0.30 per spec so particles never obscure
+    /// the subject. Grain reads at the lowest opacity (it should sit
+    /// just under perception).
+    var compositeAlpha: CGFloat {
+        switch self {
+        case .filmGrain: return 0.18
+        case .dust:      return 0.22
+        case .sparkle:   return 0.28
+        case .lensFlare: return 0.30
+        }
     }
 }

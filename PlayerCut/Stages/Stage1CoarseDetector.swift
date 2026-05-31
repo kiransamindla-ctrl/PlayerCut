@@ -131,8 +131,26 @@ actor Stage1CoarseDetector {
             log.warning("Stage 1: no candidates after retry — returning empty result, ranker Tier 3 will montage")
         }
 
-        log.info("Stage 1 done: \(trimmed.count) candidates (audio=\(audioWindows.count), motion=\(motionWindows.count))")
-        return Stage1Result(candidates: trimmed,
+        // PR #11 S1 — VNClassifyImage action boost. Sample one 480-px
+        // frame per candidate window (mid-time), classify, and boost
+        // motionScore by 1.2-1.5× on windows whose top-3 labels include
+        // a sports / action keyword. Pure ranking signal — the window
+        // still has to clear the σ thresholds above; the boost just
+        // promotes confirmed-action windows in the ranker's selection.
+        let boosts = await SceneClassifier.actionBoostScores(
+            videoURL: game.rawVideoURL, windows: trimmed)
+        var boosted: [CandidateWindow] = trimmed
+        for i in boosted.indices {
+            let factor = boosts[boosted[i].id] ?? 1.0
+            if factor > 1.0 {
+                boosted[i].motionScore = min(1.0, boosted[i].motionScore * factor)
+            }
+        }
+        let boostCount = boosts.values.filter { $0 > 1.0 }.count
+        log.info("Stage 1 action boost: \(boostCount) / \(trimmed.count) windows promoted")
+
+        log.info("Stage 1 done: \(boosted.count) candidates (audio=\(audioWindows.count), motion=\(motionWindows.count))")
+        return Stage1Result(candidates: boosted,
                             processingDuration: Date().timeIntervalSince(startedAt))
     }
 
