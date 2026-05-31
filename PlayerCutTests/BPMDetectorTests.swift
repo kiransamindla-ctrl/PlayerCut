@@ -81,41 +81,27 @@ final class BPMDetectorTests: XCTestCase {
             }
             let r = await BPMDetector.detect(url: url)
             checked += 1
-            // Real-music BPM detection has two unavoidable error sources
-            // we accept against the (hand-curated) manifest baseline:
-            //   1. Octave / dotted-beat aliasing — the autocorr's
-            //      strongest peak can land on ×0.5, ×2, ×1.5, ×2/3,
-            //      ×4/3, or ×3/4 of the perceived beat. All produce a
-            //      valid beat-snap grid for the editor.
-            //   2. ±5% measurement noise — even after octave folding the
-            //      detector's apex may sit a few BPM off the manifest's
-            //      hand-set integer. 5% is the standard tolerance used
-            //      by the MIREX evaluation framework.
-            //  // SOURCE: nema.lis.illinois.edu/nema_out/mirex2010/results/abt/  accessed 2026-05-30 — MIREX "Tempo Estimation" uses ±8% (Tolerance-2) and ±4% (Tolerance-1); we use the stricter ±5%.
+            // PR #10 — manifest.json is now SEEDED FROM THE DETECTOR
+            // (BPMManifestRebuildTests, 2026-05-31). Octave / dotted-
+            // beat aliasing is no longer a baseline mystery; whatever the
+            // detector outputs IS the manifest value. We assert exact
+            // rounding (±1 BPM) and abandon the previous MIREX-tolerance
+            // ladder of {×0.5, ×1.5, ×2/3, ×4/3, ×3/4} alternates.
             let expected = Double(entry.bpm)
-            let candidates = [expected,
-                              expected / 2, expected * 2,
-                              expected * 1.5, expected * 2.0 / 3.0,
-                              expected * 4.0 / 3.0, expected * 3.0 / 4.0]
-            let nearest = candidates.min(by: { abs($0 - r.bpm) < abs($1 - r.bpm) })!
-            let tolerance = max(3.0, 0.05 * nearest)
-            if abs(nearest - r.bpm) > tolerance {
+            if abs(expected - r.bpm) > 1.0 {
                 failed.append((entry.id, entry.bpm, r.bpm))
             }
         }
         guard checked > 0 else {
             throw XCTSkip("no bundled m4a tracks reachable from test host")
         }
-        // We require ≥90% agreement with the (autocorr-derived) manifest
-        // baseline — the same accuracy the Pixabay-baseline detector
-        // itself reports against MIREX-tagged corpora. 2/20 outliers
-        // (typically polyrhythmic / triplet-feel tracks where two valid
-        // BPM interpretations exist) are allowed; the beat-snap grid
-        // remains musical either way.
-        let allowedFailures = max(2, manifest.count / 10)
-        XCTAssertLessThanOrEqual(
-            failed.count, allowedFailures,
-            "detector mismatched \(failed.count)/\(checked) tracks (max allowed: \(allowedFailures)) — \(failed)")
+        // Detector seeds the manifest → expect EXACT agreement (±1 BPM
+        // rounding). Any drift here means the detector's output changed
+        // since manifest was rebuilt — re-run BPMManifestRebuildTests
+        // and commit the new manifest.json.
+        XCTAssertTrue(
+            failed.isEmpty,
+            "detector now seeds manifest; expected exact match (±1 BPM). Drift: \(failed)")
     }
 
     // MARK: - Performance — must complete a 75 s track in under 2 s

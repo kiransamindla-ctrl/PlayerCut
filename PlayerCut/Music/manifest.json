@@ -4,14 +4,14 @@
       "id": "energetic_1",
       "file": "energetic_1.m4a",
       "vibe": "Energetic",
-      "bpm": 138,
+      "bpm": 159,
       "duration": 111.5
     },
     {
       "id": "energetic_2",
       "file": "energetic_2.m4a",
       "vibe": "Energetic",
-      "bpm": 142,
+      "bpm": 147,
       "duration": 117.5
     },
     {
@@ -32,21 +32,21 @@
       "id": "energetic_5",
       "file": "energetic_5.m4a",
       "vibe": "Energetic",
-      "bpm": 131,
+      "bpm": 135,
       "duration": 178.5
     },
     {
       "id": "cinematic_1",
       "file": "cinematic_1.m4a",
       "vibe": "Cinematic",
-      "bpm": 110,
+      "bpm": 111,
       "duration": 132.0
     },
     {
       "id": "cinematic_2",
       "file": "cinematic_2.m4a",
       "vibe": "Cinematic",
-      "bpm": 121,
+      "bpm": 125,
       "duration": 70.6
     },
     {
@@ -60,7 +60,7 @@
       "id": "cinematic_4",
       "file": "cinematic_4.m4a",
       "vibe": "Cinematic",
-      "bpm": 82,
+      "bpm": 123,
       "duration": 110.2
     },
     {
@@ -74,28 +74,28 @@
       "id": "playful_1",
       "file": "playful_1.m4a",
       "vibe": "Playful",
-      "bpm": 119,
+      "bpm": 120,
       "duration": 122.0
     },
     {
       "id": "playful_2",
       "file": "playful_2.m4a",
       "vibe": "Playful",
-      "bpm": 119,
+      "bpm": 120,
       "duration": 151.0
     },
     {
       "id": "playful_3",
       "file": "playful_3.m4a",
       "vibe": "Playful",
-      "bpm": 117,
+      "bpm": 118,
       "duration": 118.5
     },
     {
       "id": "playful_4",
       "file": "playful_4.m4a",
       "vibe": "Playful",
-      "bpm": 117,
+      "bpm": 118,
       "duration": 349.9
     },
     {
@@ -116,32 +116,33 @@
       "id": "chill_2",
       "file": "chill_2.m4a",
       "vibe": "Chill",
-      "bpm": 78,
+      "bpm": 117,
       "duration": 147.0
     },
     {
       "id": "chill_3",
       "file": "chill_3.m4a",
       "vibe": "Chill",
-      "bpm": 80,
+      "bpm": 107,
       "duration": 121.5
     },
     {
       "id": "chill_4",
       "file": "chill_4.m4a",
       "vibe": "Chill",
-      "bpm": 88,
+      "bpm": 121,
       "duration": 102.2
     },
     {
       "id": "chill_5",
       "file": "chill_5.m4a",
       "vibe": "Chill",
-      "bpm": 90,
+      "bpm": 137,
       "duration": 78.0
     }
   ],
-  "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) \u2014 royalty-free, commercial use OK, no attribution required. Per-track source filenames in LICENSES.md.",
-  "generated": "2026-05-25",
+  "license": "Pixabay Content License (https://pixabay.com/service/license-summary/) — royalty-free, commercial use OK, no attribution required. Per-track source filenames in LICENSES.md.",
+  "generated": "2026-05-31",
+  "rebuiltFromDetector": true,
   "count": 20
 }
