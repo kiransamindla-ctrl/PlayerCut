@@ -246,32 +246,53 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
                                  scale: key.scale,
                                  outputSize: outputSize)
 
-        // Cinematic grade pipeline (Section 3). Order:
-        //   1. (skipped: per-clip exposure/WB correction would land
-        //       here — DEFERRED, requires a pre-pass over the source.)
-        //   2. Apply the creative LUT to the (already cropped) source.
-        //   3. Blend the LUT result with the unmodified cropped source
-        //      at ~70 % opacity. // SOURCE: pixflow.net 2026-02-09 —
-        //      pros apply creative LUTs at 60-80 % intensity, not full
-        //      strength, so the look reads "dialed in" rather than
-        //      "filter slapped on top."
-        //   4. Polish: subtle MPS unsharp mask (no halos), gentle
-        //      vignette via solid-color overlay (off for v1; covered
-        //      by the vibe-specific LUTs already).
+        // Cinematic grade pipeline. Order:
+        //   1. PR #11 S3 — per-clip auto color match. Multiplicative
+        //      per-channel gain nudges this clip's mean RGB toward the
+        //      reel-wide median computed in ColorMatchAnalyzer. Skipped
+        //      when the gain is the (1,1,1) identity sentinel — most
+        //      clips on uniform-light footage land within the 1%
+        //      tolerance and bypass this pass entirely.
+        //   2. Apply the creative LUT to the (matched) source.
+        //   3. Blend the LUT result with the matched source at ~70%
+        //      opacity. // SOURCE: pixflow.net 2026-02-09 — pros apply
+        //      creative LUTs at 60-80% intensity.
+        //   4. Polish: subtle MPS unsharp mask.
+        let gain = instruction.colorMatchGain
+        let matched: MTIImage = {
+            if abs(gain.x - 1) < 0.01,
+               abs(gain.y - 1) < 0.01,
+               abs(gain.z - 1) < 0.01 {
+                return cropped
+            }
+            // 4×5 column-major color matrix: diagonal = per-channel gain,
+            // last column = bias (zero). Same matrix MTIColorMatrixFilter
+            // expects.
+            let matrix = MTIColorMatrix(matrix: matrix_float4x4(
+                SIMD4<Float>(gain.x, 0, 0, 0),
+                SIMD4<Float>(0, gain.y, 0, 0),
+                SIMD4<Float>(0, 0, gain.z, 0),
+                SIMD4<Float>(0, 0, 0, 1)),
+                bias: SIMD4<Float>(0, 0, 0, 0))
+            let filter = MTIColorMatrixFilter()
+            filter.inputImage = cropped
+            filter.colorMatrix = matrix
+            return filter.outputImage ?? cropped
+        }()
         let fullyGraded: MTIImage
         if let lutImage = lutCache.image(for: instruction.look) {
             let cube = MTIColorLookupFilter()
-            cube.inputImage = cropped
+            cube.inputImage = matched
             cube.inputColorLookupTable = lutImage
-            fullyGraded = cube.outputImage ?? cropped
+            fullyGraded = cube.outputImage ?? matched
         } else {
-            fullyGraded = cropped
+            fullyGraded = matched
         }
-        // Blend graded ← 70% over cropped ← 30% via MTIBlendFilter.
+        // Blend graded ← 70% over matched ← 30% via MTIBlendFilter.
         // MTIBlendFilter's intensity controls the foreground opacity.
         let lutBlendIntensity: Float = 0.70
         let blend = MTIBlendFilter(blendMode: .normal)
-        blend.inputBackgroundImage = cropped
+        blend.inputBackgroundImage = matched
         blend.inputImage = fullyGraded
         blend.intensity = lutBlendIntensity
         let graded = blend.outputImage ?? fullyGraded
@@ -752,6 +773,14 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
     /// title card can coexist with a caption). Drives Section 2 of the
     /// CapCut-parity PR.
     let captionOverlay: Overlay?
+    /// PR #11 S3 — per-clip multiplicative gain applied BEFORE the LUT
+    /// lookup so a sun-into-shade pan is normalized before the creative
+    /// grade has its say. (1,1,1) = no correction (the identity that
+    /// makes the compositor skip the pre-LUT scale).
+    let colorMatchGain: SIMD3<Float>
+    /// PR #11 S4 — optional procedural particle layer composited above
+    /// the graded frame at ≤ 0.30 opacity. nil = no particles.
+    let particles: ParticleKind?
 
     init(timeRange: CMTimeRange,
          startSeconds: Double,
@@ -764,7 +793,9 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
          transitionEnd: Double?,
          overlay: Overlay? = nil,
          pacingTier: PacingTier? = nil,
-         captionOverlay: Overlay? = nil) {
+         captionOverlay: Overlay? = nil,
+         colorMatchGain: SIMD3<Float> = SIMD3<Float>(1, 1, 1),
+         particles: ParticleKind? = nil) {
         self.timeRange = timeRange
         self.startSeconds = startSeconds
         self.trackAID = trackAID
@@ -777,6 +808,8 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
         self.overlay = overlay
         self.pacingTier = pacingTier
         self.captionOverlay = captionOverlay
+        self.colorMatchGain = colorMatchGain
+        self.particles = particles
         super.init()
     }
 
@@ -796,7 +829,9 @@ final class MetalPetalInstruction: NSObject, AVVideoCompositionInstructionProtoc
             transitionEnd: transitionEnd,
             overlay: overlay,
             pacingTier: pacingTier,
-            captionOverlay: captionOverlay)
+            captionOverlay: captionOverlay,
+            colorMatchGain: colorMatchGain,
+            particles: particles)
     }
 
     var enablePostProcessing: Bool { false }

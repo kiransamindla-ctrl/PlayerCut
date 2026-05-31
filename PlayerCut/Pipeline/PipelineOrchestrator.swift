@@ -311,12 +311,42 @@ actor PipelineOrchestrator {
                     } else {
                         self.log.info("Music picked: \(pickedTrack?.id ?? "<override>", privacy: .public) bpm=\(finalMusicBPM ?? 0)")
                     }
-                    let editPlan = builder.build(
+                    var editPlan = builder.build(
                         from: plan,
                         player: player,
                         game: game,
                         musicURL: finalMusicURL,
                         musicBPM: finalMusicBPM)
+                    // PR #11 S3 — auto color match: sample each clip's
+                    // mid-frame mean RGB, compute reel-wide median, emit
+                    // per-clip gains capped at ±18%. Stamped onto each
+                    // ClipPlan so ReelComposer can hand them to the
+                    // compositor in the SAME render pass as the LUT.
+                    let gains = await ColorMatchAnalyzer.analyze(
+                        plan: editPlan, sourceURL: game.rawVideoURL)
+                    if var cold = editPlan.coldOpen, let g = gains[cold.id] {
+                        cold.colorMatchGain = SIMD3<Float>(g.r, g.g, g.b)
+                        editPlan.coldOpen = cold
+                    }
+                    editPlan.body = editPlan.body.map { clip in
+                        guard let g = gains[clip.id] else { return clip }
+                        var c = clip
+                        c.colorMatchGain = SIMD3<Float>(g.r, g.g, g.b)
+                        return c
+                    }
+                    // PR #11 S4 — opt-in particle layer from the active
+                    // template. Same render pass; nil = no particle layer.
+                    if let particleKind = resolvedTemplate?.extras?.particles {
+                        if var cold = editPlan.coldOpen {
+                            cold.particles = particleKind
+                            editPlan.coldOpen = cold
+                        }
+                        editPlan.body = editPlan.body.map { clip in
+                            var c = clip
+                            c.particles = particleKind
+                            return c
+                        }
+                    }
                     await DiagnosticsStore.shared.recordDuration(
                         .composePlan,
                         seconds: Date().timeIntervalSince(planBuildStart))

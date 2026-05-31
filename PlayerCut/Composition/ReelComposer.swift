@@ -853,6 +853,10 @@ final class ReelComposer {
             bTrackID = trackB.trackID
         }
 
+        // PR #11 S3+S4 — per-clip auto color match gain + opt-in particle
+        // overlay are both per-clip fields on ClipPlan; the orchestrator
+        // populates them after EditPlanBuilder.build returns. Default
+        // identity gain + nil particles preserve the legacy render path.
         let instr = MetalPetalInstruction(
             timeRange: outRange,
             startSeconds: segmentStart.seconds,
@@ -863,7 +867,9 @@ final class ReelComposer {
             transitionKind: transitionKind,
             transitionStart: transitionStart,
             transitionEnd: transitionEnd,
-            overlay: overlay)
+            overlay: overlay,
+            colorMatchGain: clip.colorMatchGain,
+            particles: clip.particles)
         instructions.append(instr)
     }
 

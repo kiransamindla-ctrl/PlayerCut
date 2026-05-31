@@ -186,6 +186,15 @@ struct ClipPlan: Identifiable {
     /// hero "apex freeze." 0 = no freeze. ReelComposer.insertClip honors
     /// it by inserting one last source frame scaled to this duration.
     var freezeFrameSeconds: Double = 0
+    /// PR #11 S3 — per-channel multiplicative correction applied BEFORE
+    /// the LUT blend so a sun-into-shade pan doesn't break the look.
+    /// Default identity (1,1,1) skips the pre-LUT pass entirely; the
+    /// orchestrator overwrites this with ColorMatchAnalyzer's output
+    /// when auto color match runs.
+    var colorMatchGain: SIMD3<Float> = SIMD3<Float>(1, 1, 1)
+    /// PR #11 S4 — opt-in particle overlay propagated from the active
+    /// template's extras.particles. nil = no particle layer rendered.
+    var particles: ParticleKind? = nil
 
     /// Source duration before any speed mapping.
     var sourceDuration: Double { sourceEnd - sourceStart }
