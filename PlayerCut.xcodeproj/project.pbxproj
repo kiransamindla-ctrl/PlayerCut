@@ -57,6 +57,7 @@
 		863BB26D0F4D510BB278CF0A /* ReelSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836B46F23454E6CA08016C67 /* ReelSettings.swift */; };
 		8CC6122976232C93636205B9 /* PoseSignal.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA115F6E9FA792435474899 /* PoseSignal.swift */; };
 		8E91EF398ADC5BB54EBB4BEE /* Accessory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18434B84D8D05760F638876 /* Accessory.swift */; };
+		91A196C14884DAA941329F6B /* BPMDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4359A84AF81C2A474BF8D802 /* BPMDetectorTests.swift */; };
 		95014DDD0D1C6BCD03743C32 /* CaptureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24D4CA15A14D5F147D77A85 /* CaptureView.swift */; };
 		96992BACDFBD071633EAFE99 /* PaywallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3B1357CF532FAF1C646A95C /* PaywallView.swift */; };
 		973D37FB0B8590D6F3869DDA /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36946E4469D60B7F569114E3 /* Storage.swift */; };
@@ -87,6 +88,7 @@
 		D2DB86DF3625A5D8226838F3 /* DeviceCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF92EE722574193DFC45FD7 /* DeviceCapabilities.swift */; };
 		D79DD14CD5848001DA281836 /* MetalPetalCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D013E23F01E91D1ECCB2565 /* MetalPetalCompositor.swift */; };
 		DB19202F0F7C740BCF51A698 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D00ECD5C55F39FB0B691F9 /* DiagnosticsView.swift */; };
+		DC60D646A65ABD22462F8979 /* BPMDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AA741B7A64E6E01FEA4FC8 /* BPMDetector.swift */; };
 		E1C3A2B0607A679EBB1C4545 /* energetic_5.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D8B7CDD2F57151DEE09FBF11 /* energetic_5.m4a */; };
 		E2867AA2B612744DAFC97438 /* PHVideoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B37614D9B6F0A4EE67D0C78 /* PHVideoPicker.swift */; };
 		E8AB26D4660F746EA794A002 /* playful_3.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A60E528928A013776B111E82 /* playful_3.m4a */; };
@@ -131,6 +133,7 @@
 		33DB14ED78F33CE1DF36DF10 /* cinematic_1.m4a */ = {isa = PBXFileReference; path = cinematic_1.m4a; sourceTree = "<group>"; };
 		36946E4469D60B7F569114E3 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
 		3F7851FE3324E34A43A322CD /* StringDistance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StringDistance.swift; sourceTree = "<group>"; };
+		4359A84AF81C2A474BF8D802 /* BPMDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMDetectorTests.swift; sourceTree = "<group>"; };
 		45E3F1F197EF90A4AEF8B775 /* CompilationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompilationView.swift; sourceTree = "<group>"; };
 		46CCE07A6E2B577DADAF5544 /* LUTFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUTFactory.swift; sourceTree = "<group>"; };
 		48412ECA01A56EBE2AB0F81D /* BeaconScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeaconScanner.swift; sourceTree = "<group>"; };
@@ -172,6 +175,7 @@
 		ABEFF6C14BB1A9BD0C5460B8 /* cinematic_5.m4a */ = {isa = PBXFileReference; path = cinematic_5.m4a; sourceTree = "<group>"; };
 		AE892148703051040369F4C6 /* PlayerCutTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlayerCutTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AEA1F057C200562440C24D18 /* ETAEstimator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ETAEstimator.swift; sourceTree = "<group>"; };
+		B1AA741B7A64E6E01FEA4FC8 /* BPMDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMDetector.swift; sourceTree = "<group>"; };
 		B24D4CA15A14D5F147D77A85 /* CaptureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureView.swift; sourceTree = "<group>"; };
 		B37479B5A9C81C2B2857A525 /* MusicLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MusicLibrary.swift; sourceTree = "<group>"; };
 		B38DCAC4AEAB113F515EDF65 /* chill_2.m4a */ = {isa = PBXFileReference; path = chill_2.m4a; sourceTree = "<group>"; };
@@ -325,6 +329,7 @@
 		682C45CB67498D2F97B7E3AC /* PlayerCutTests */ = {
 			isa = PBXGroup;
 			children = (
+				4359A84AF81C2A474BF8D802 /* BPMDetectorTests.swift */,
 				5F4A4B71D8E971A80AF66723 /* CompositionTests.swift */,
 				215BC0C3EDC8C14473879D32 /* ExportTempoTests.swift */,
 				CA0F8A80B4A9C591C60B82B5 /* PlayerCutTests.swift */,
@@ -462,6 +467,7 @@
 		B2CF7EA2EB0D76C313358090 /* Audio */ = {
 			isa = PBXGroup;
 			children = (
+				B1AA741B7A64E6E01FEA4FC8 /* BPMDetector.swift */,
 				C8C873357F773A3964122AAF /* SpeechTranscriber.swift */,
 			);
 			path = Audio;
@@ -690,6 +696,7 @@
 				8E91EF398ADC5BB54EBB4BEE /* Accessory.swift in Sources */,
 				028778EE99CF1DCC3B47DD56 /* AssistedTierView.swift in Sources */,
 				24A837E5D322F0610A80213A /* AudioPeakDetector.swift in Sources */,
+				DC60D646A65ABD22462F8979 /* BPMDetector.swift in Sources */,
 				77293FA0F97806539B9CD4ED /* BackgroundProcessingV2.swift in Sources */,
 				2E38600E16027E9E6F65A6FB /* BackgroundRefreshGuidance.swift in Sources */,
 				30146C06C5905FE650F30654 /* BeaconScanner.swift in Sources */,
@@ -749,6 +756,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				91A196C14884DAA941329F6B /* BPMDetectorTests.swift in Sources */,
 				C64DC90B62B7DE166E378DFE /* CompositionTests.swift in Sources */,
 				28960BFCBEFDD98BA916DF3F /* ExportTempoTests.swift in Sources */,
 				85DCFCCA63858A8469FDE82E /* PlayerCutTests.swift in Sources */,
