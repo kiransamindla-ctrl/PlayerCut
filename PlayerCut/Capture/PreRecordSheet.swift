@@ -163,12 +163,27 @@ struct PreRecordSheet: View {
             selectedTemplateID = template.id
         } label: {
             VStack(spacing: 8) {
-                Image(systemName: template.thumbnailAsset)
-                    .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(isSelected ? .white : Theme.textPrimary)
+                // PR #10 — real keystone-rendered thumbnail JPG (600x800
+                // captured from sample-video runs in
+                // TemplateThumbnailRenderTests). Falls back to the
+                // template's SF symbol when the bundle doesn't carry the
+                // JPG (older installs or unbundled debug variants).
+                Group {
+                    if let uiImg = UIImage(named: template.id) {
+                        Image(uiImage: uiImg)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
+                        Image(systemName: template.thumbnailAsset)
+                            .font(.system(size: 38, weight: .light))
+                            .foregroundStyle(isSelected ? .white : Theme.textPrimary)
+                    }
+                }
                     .frame(width: 110, height: 140)
+                    .clipped()
                     .background(isSelected ? Theme.primary : Theme.bgCard,
                                 in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.Radius.card)
                             .stroke(isSelected ? Theme.accent : .clear,
