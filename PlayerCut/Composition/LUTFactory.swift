@@ -133,6 +133,38 @@ enum LUTFactory {
             let outG = warm.g - rolloff
             let outB = warm.b - rolloff
             return RGB(r: clamp(outR), g: clamp(outG), b: clamp(outB))
+        case .punchy:
+            // High contrast + high saturation. Used by the
+            // "beat-sync-fast" + "attitude-montage" templates where
+            // the look has to compete with rapid cuts. Stays under
+            // the "Instagram filter" threshold by clipping saturation
+            // at +25% instead of +40%.
+            let cr = sigmoidContrast(r, strength: 1.32)
+            let cg = sigmoidContrast(g, strength: 1.32)
+            let cb = sigmoidContrast(b, strength: 1.32)
+            let sat = saturate(r: cr, g: cg, b: cb, k: 1.25)
+            return RGB(r: clamp(sat.r), g: clamp(sat.g), b: clamp(sat.b))
+        case .soft:
+            // Aesthetic-slow / dreamy look — lifted blacks (the
+            // shadows never reach pure black), desaturated greens
+            // pushed toward cyan, midtones pushed toward pink. Used
+            // by the "aesthetic-slow" template; the lifted blacks
+            // are the signature "vintage film" cue.
+            let lift = shadowLift(r: r, g: g, b: b, amount: 0.10)
+            // Gentle contrast — keep the lifted-shadow softness.
+            let cr = sigmoidContrast(lift.r, strength: 1.05)
+            let cg = sigmoidContrast(lift.g, strength: 1.05)
+            let cb = sigmoidContrast(lift.b, strength: 1.05)
+            // Desaturate then split-tone: shadows toward cyan
+            // (+B, +G slight), midtones toward pink (+R, +B slight).
+            let desat = saturate(r: cr, g: cg, b: cb, k: 0.82)
+            let lum = 0.2126 * desat.r + 0.7152 * desat.g + 0.0722 * desat.b
+            let shadowW = max(0, 1 - lum * 1.6)
+            let midW = max(0, 1 - abs(lum - 0.5) * 2)
+            let outR = desat.r + 0.04 * midW
+            let outG = desat.g + 0.02 * shadowW
+            let outB = desat.b + 0.05 * shadowW + 0.03 * midW
+            return RGB(r: clamp(outR), g: clamp(outG), b: clamp(outB))
         }
     }
 

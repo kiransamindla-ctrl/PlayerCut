@@ -121,13 +121,28 @@ actor PipelineOrchestrator {
                     await DiagnosticsStore.shared.recordEnum(
                         .reelLength,
                         value: game.reelLengthOverride ?? player.reelLengthPreference)
+                    // Templates — resolve the per-player or system-default
+                    // template, then overlay its pacing / extras onto the
+                    // user's ReelSettings so EditPlanBuilder + ReelComposer
+                    // pick them up via their existing `.current` reads.
+                    let baseSettings = ReelSettings.current
+                    let resolvedTemplate = await MainActor.run {
+                        TemplateRegistry.shared.resolve(
+                            playerDefaultID: player.defaultTemplateID,
+                            settingsSelectedID: baseSettings.selectedTemplateID.isEmpty
+                                ? nil : baseSettings.selectedTemplateID)
+                    }
+                    if let t = resolvedTemplate {
+                        self.log.info("Template active: \(t.id, privacy: .public) (\(t.displayName, privacy: .public))")
+                    }
+                    let settings = baseSettings.applying(resolvedTemplate)
+
                     // CapCut-parity S5 — resolve sceneType from the user's
                     // override (Settings → Stage 1 debug) or from a 4-frame
                     // VNClassifyImageRequest vote on the raw video. The
                     // hardcoded `.outdoor` default set at capture is only
                     // honored when both the override is .auto AND the
                     // classifier abstains.
-                    let settings = ReelSettings.current
                     switch settings.forceSceneType {
                     case .indoor:  game.sceneType = .indoor
                     case .outdoor: game.sceneType = .outdoor

@@ -47,6 +47,10 @@ enum ReelSettingsKeys {
     // CapCut-parity S5 — Stage 1 debug
     static let forceSceneType    = "playercut.debug.forceSceneType"    // String enum (SceneOverride)
     static let usePoseSignal     = "playercut.debug.usePoseSignal"     // Bool
+
+    // Templates — selected ReelTemplate id (system-wide fallback when
+    // the player has no defaultTemplateID). Empty string = use system default.
+    static let selectedTemplateID = "playercut.reel.selectedTemplateID"  // String
 }
 
 /// Background-removal modes for the MetalPetal segmentation pass.
@@ -104,6 +108,12 @@ struct ReelSettings: Equatable {
     var forceSceneType: SceneOverride
     var usePoseSignal: Bool
 
+    // MARK: - Templates
+    /// Selected `ReelTemplate.id`. Empty string = use system default
+    /// (`TemplateRegistry.defaultTemplateID`) or the player's per-profile
+    /// override when one is set.
+    var selectedTemplateID: String
+
     // MARK: - Defaults — Default-ON-for-quality-wins per project rules
     static let defaults = ReelSettings(
         includeGameAudio:  true,
@@ -124,7 +134,8 @@ struct ReelSettings: Equatable {
         captionLocale:      "auto",
         captionPosition:    .bottom,
         forceSceneType:     .auto,
-        usePoseSignal:      true)
+        usePoseSignal:      true,
+        selectedTemplateID: "")           // empty = use system / per-player default
 
     /// Fresh read from UserDefaults. Each compose() picks up the user's
     /// latest A/B settings without needing a relaunch.
@@ -172,7 +183,27 @@ struct ReelSettings: Equatable {
                 SceneOverride(rawValue: d.string(forKey: ReelSettingsKeys.forceSceneType) ?? "")
                     ?? base.forceSceneType,
             usePoseSignal:
-                d.object(forKey: ReelSettingsKeys.usePoseSignal)     as? Bool   ?? base.usePoseSignal)
+                d.object(forKey: ReelSettingsKeys.usePoseSignal)     as? Bool   ?? base.usePoseSignal,
+            selectedTemplateID:
+                d.string(forKey: ReelSettingsKeys.selectedTemplateID)       ?? base.selectedTemplateID)
+    }
+
+    /// Returns a copy of `self` with pacing / hero-freeze / background-mode
+    /// fields replaced by the template's values. Captions stay opt-in via
+    /// the template's `extras.captionsEnabled` (nil = honor the global
+    /// setting). Used by PipelineOrchestrator at compose time so the
+    /// active template's pacing reaches EditPlanBuilder + ReelComposer
+    /// without rewriting their read-from-defaults pattern.
+    func applying(_ template: ReelTemplate?) -> ReelSettings {
+        guard let t = template else { return self }
+        var copy = self
+        copy.heroDurationSec   = t.pacingTiers.heroDurationSec
+        copy.fillerDurationSec = t.pacingTiers.fillerDurationSec
+        if let ext = t.extras {
+            if let cap = ext.captionsEnabled { copy.captionsEnabled = cap }
+            if let bg  = ext.backgroundMode  { copy.backgroundMode  = bg  }
+        }
+        return copy
     }
 
     /// dB → linear gain helper used by both the audio mix and the tests.

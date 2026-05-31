@@ -95,6 +95,8 @@ enum ColorLook: String, Codable {
     case natural
     case stadium    // teal-orange sports
     case warm       // gentle cinematic
+    case punchy     // high-contrast / high-sat — for fast-cut / attitude templates
+    case soft       // lifted blacks, desaturated cyan-pink — aesthetic-slow / dreamy
 }
 
 // MARK: - Plan + child types
@@ -257,6 +259,11 @@ enum TransitionKind: String, Codable {
     /// Fade from / to solid black. Reserved for opening + closing.
     case fadeFromBlack
     case fadeToBlack
+    /// Single-frame white-flash punctuation. Used by the
+    /// "trendy-transitions" template on the highest-energy beat.
+    /// When the compositor doesn't implement it yet, falls back to
+    /// .hardCut (still snaps to the beat).
+    case flash
 }
 
 // MARK: - Title cards
