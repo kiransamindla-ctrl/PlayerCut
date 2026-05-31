@@ -104,6 +104,7 @@
 		CAAE05117AD58B62C7E77600 /* ETAEstimator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEA1F057C200562440C24D18 /* ETAEstimator.swift */; };
 		CACDE05E8B3D03593893DB93 /* AnalysisFrameReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4AC91960D65A532C7331F4E /* AnalysisFrameReaderTests.swift */; };
 		D22548D9D37ACB6C5E6F1323 /* EnrollmentViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D749DFAEDD43402C90FC8DCD /* EnrollmentViewModel.swift */; };
+		D28E58D10F2F72B791136A53 /* SceneActionBoostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F27D148CC3ED6FF90D2BF20A /* SceneActionBoostTests.swift */; };
 		D2DB86DF3625A5D8226838F3 /* DeviceCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EF92EE722574193DFC45FD7 /* DeviceCapabilities.swift */; };
 		D562CE2D8DEE00B3C771F50F /* MusicImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 264956D2D37CEB8DA4305518 /* MusicImportTests.swift */; };
 		D79DD14CD5848001DA281836 /* MetalPetalCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D013E23F01E91D1ECCB2565 /* MetalPetalCompositor.swift */; };
@@ -247,6 +248,7 @@
 		E6A803F76A9A50B91E65A996 /* SampleVideoFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleVideoFactory.swift; sourceTree = "<group>"; };
 		EF2985FA50AC2377993975AF /* playful_2.m4a */ = {isa = PBXFileReference; path = playful_2.m4a; sourceTree = "<group>"; };
 		F25B19609EF850B4C81711AA /* SubjectFollowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubjectFollowTests.swift; sourceTree = "<group>"; };
+		F27D148CC3ED6FF90D2BF20A /* SceneActionBoostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneActionBoostTests.swift; sourceTree = "<group>"; };
 		F4DA23C619D6D76C2BBF6E66 /* beat-sync-fast.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "beat-sync-fast.jpg"; sourceTree = "<group>"; };
 		FF6830B2948E4906709E6F4F /* SceneClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneClassifier.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -383,6 +385,7 @@
 				5B9209D6081BE50130FEE217 /* ReelQualityTests.swift */,
 				E6A803F76A9A50B91E65A996 /* SampleVideoFactory.swift */,
 				CA52F250C481A8DD4DC73271 /* SampleVideoPipelineTests.swift */,
+				F27D148CC3ED6FF90D2BF20A /* SceneActionBoostTests.swift */,
 				5C52DBF6134A195689328530 /* Stage2ResolutionTests.swift */,
 				F25B19609EF850B4C81711AA /* SubjectFollowTests.swift */,
 				561ED0AD9C5FAC56A615DEBD /* TemplateE2ETests.swift */,
@@ -855,6 +858,7 @@
 				F5900BE0B10F11DDF6A39008 /* ReelQualityTests.swift in Sources */,
 				15DB9DEE7017F9FF9C5D8FEC /* SampleVideoFactory.swift in Sources */,
 				BF8B13FA4269D5894C957255 /* SampleVideoPipelineTests.swift in Sources */,
+				D28E58D10F2F72B791136A53 /* SceneActionBoostTests.swift in Sources */,
 				BEAAAD9E8AA3AB31BAFCF27A /* Stage2ResolutionTests.swift in Sources */,
 				1BE0CF976A14B5F6626FB6E6 /* SubjectFollowTests.swift in Sources */,
 				145EAE52E7CE661FA2131C89 /* TemplateE2ETests.swift in Sources */,
