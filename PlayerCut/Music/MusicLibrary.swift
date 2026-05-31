@@ -21,30 +21,68 @@ final class MusicLibrary {
 
     static let shared = MusicLibrary()
 
-    /// One bundled music track. URL is resolved lazily against the
-    /// main bundle (the .m4a is a Resources file from project.yml's
-    /// `path: PlayerCut` sources include).
+    /// One music track — bundled (from manifest.json) or user-imported
+    /// (from MusicImportManager / ImportedMusic/ sandbox). URL is
+    /// resolved per-source so the picker doesn't have to know whether
+    /// a track originated in the bundle or in the sandbox.
     struct Track: Equatable, Hashable {
-        let id: String          // "energetic_3"
+        let id: String          // "energetic_3" or "imported_<uuid>"
         let vibe: MusicVibe     // .energetic
         let bpm: Int            // 150
         let duration: Double    // 75.0 seconds
+        let isImported: Bool    // gates the "Imported" badge in Settings
+        /// Captured at Track construction. Bundled tracks resolve via
+        /// Bundle.url(forResource:); imported tracks resolve via the
+        /// MainActor MusicImportManager (so capture must happen there).
+        /// Stored so the sync `url` getter doesn't need MainActor.
+        let storedURL: URL?
 
-        var url: URL? {
-            Bundle.main.url(forResource: id, withExtension: "m4a")
+        var url: URL? { storedURL }
+
+        /// Convenience for bundled tracks where the URL is a pure
+        /// function of the id + extension.
+        static func bundled(id: String, vibe: MusicVibe,
+                            bpm: Int, duration: Double) -> Track {
+            Track(id: id, vibe: vibe, bpm: bpm, duration: duration,
+                  isImported: false,
+                  storedURL: Bundle.main.url(forResource: id,
+                                             withExtension: "m4a"))
         }
     }
 
-    /// All tracks parsed from manifest.json at init time. Read-only.
-    let allTracks: [Track]
+    /// Bundled-only tracks parsed from manifest.json at init time.
+    /// Read-only. Use `allTracks` (computed) when the caller wants the
+    /// full library including imports.
+    let bundledTracks: [Track]
+
+    /// Bundled + user-imported tracks. Imports are picked up live each
+    /// access so Settings → Music edits show up without an app restart.
+    var allTracks: [Track] {
+        bundledTracks + importedAsTracks()
+    }
+
+    /// Snapshot the current imports as `Track` values for the picker.
+    /// Resolves URLs eagerly on the MainActor (where MusicImportManager
+    /// lives) so the resulting `Track.url` getter stays sync.
+    private func importedAsTracks() -> [Track] {
+        let manager = MusicImportManager.shared
+        return manager.tracks.map { t in
+            Track(id: t.id,
+                  vibe: t.vibe,
+                  bpm: t.bpm ?? Int(BPMDetector.fallbackBPM),
+                  duration: t.duration,
+                  isImported: true,
+                  storedURL: manager.url(for: t.id))
+        }
+    }
 
     private let log = Logger(subsystem: "com.playercut.app",
                              category: "MusicLibrary")
     private let defaultsKeyPrefix = "playercut.music.lru."
 
     private init() {
-        self.allTracks = Self.loadManifest()
-        log.info("MusicLibrary loaded \(self.allTracks.count) tracks")
+        self.bundledTracks = Self.loadManifest()
+        log.info("MusicLibrary loaded \(self.bundledTracks.count) bundled tracks")
     }
 
     // MARK: - Public picker
@@ -159,8 +197,8 @@ final class MusicLibrary {
                 log.warning("manifest track \(raw.id, privacy: .public) has unknown vibe \(raw.vibe, privacy: .public)")
                 return nil
             }
-            return Track(id: raw.id, vibe: vibe,
-                         bpm: raw.bpm, duration: raw.duration)
+            return Track.bundled(id: raw.id, vibe: vibe,
+                                 bpm: raw.bpm, duration: raw.duration)
         }
     }
 

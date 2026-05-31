@@ -76,11 +76,42 @@ enum BPMDetector {
                 logger.warning("BPMDetect: no audio track in \(url.lastPathComponent, privacy: .public) — fallback 120 BPM")
                 return Result(bpm: fallbackBPM, confidence: 0, didFallback: true)
             }
-            return await detect(asset: asset, audioTrack: audio)
+            let r = await detect(asset: asset, audioTrack: audio)
+            // CapCut-parity S8 — diagnostic when our detector disagrees
+            // with a manifest BPM by more than 5. Lets us surface the
+            // 1/20 outlier (energetic_1) and any other future drift to
+            // the engineer + the user without changing the detector or
+            // the manifest in code.
+            if let manifestBPM = manifestBPM(forID: url.deletingPathExtension().lastPathComponent),
+               abs(Double(manifestBPM) - r.bpm) > 5,
+               !r.didFallback {
+                logger.warning("BPMDetect: manifest divergence for \(url.lastPathComponent, privacy: .public) — manifest=\(manifestBPM) detected=\(r.bpm, format: .fixed(precision: 1)) (Δ=\(abs(Double(manifestBPM) - r.bpm), format: .fixed(precision: 1)))")
+            }
+            return r
         } catch {
             logger.warning("BPMDetect: loadTracks failed (\(error.localizedDescription, privacy: .public)) — fallback 120 BPM")
             return Result(bpm: fallbackBPM, confidence: 0, didFallback: true)
         }
+    }
+
+    /// Looks up the manifest BPM for a bundled track id (e.g. "energetic_1").
+    /// Returns nil for any non-bundled / non-manifest asset (BYO imports,
+    /// test fixtures) so the divergence log fires only on the canonical
+    /// 20-track Pixabay pool.
+    private static func manifestBPM(forID id: String) -> Int? {
+        guard let url = Bundle.main.url(forResource: "manifest",
+                                        withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tracks = root["tracks"] as? [[String: Any]]
+        else { return nil }
+        for entry in tracks {
+            if (entry["id"] as? String) == id,
+               let bpm = entry["bpm"] as? Int {
+                return bpm
+            }
+        }
+        return nil
     }
 
     static func detect(asset: AVAsset, audioTrack: AVAssetTrack) async -> Result {

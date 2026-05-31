@@ -72,6 +72,11 @@ struct EditPlanBuilder {
     /// User-tunable reel knobs (pacing tiers, slow-mo, hook-first). Read
     /// fresh from UserDefaults by default; tests can pass an override.
     let settings: ReelSettings
+    /// Active reel template, when one is selected. Drives beat-snap
+    /// aggressiveness + slow-mo apex factor directly so the picked
+    /// preset is visible in the final edit. nil = use settings/profile
+    /// defaults (back-compat with the no-template callers).
+    let template: ReelTemplate?
 
     /// Source video duration (used to clamp cold-open / clip windows).
     let sourceDuration: Double
@@ -80,12 +85,33 @@ struct EditPlanBuilder {
          output: OutputSpec,
          sourceDuration: Double,
          profile: PerfProfile = .highEnd,
-         settings: ReelSettings = .current) {
+         settings: ReelSettings = .current,
+         template: ReelTemplate? = nil) {
         self.style = style
         self.output = output
         self.sourceDuration = sourceDuration
         self.profile = profile
         self.settings = settings
+        self.template = template
+    }
+
+    // MARK: - Template-derived parameters
+
+    /// Slow-mo apex factor: template wins when set, else the perf
+    /// profile's default (which itself is a function of device tier).
+    /// `settings.slowMoSpeed` is used as a per-clip override in the
+    /// hero-pacing path below for back-compat.
+    private var resolvedApexFactor: Double {
+        template?.speedRamp?.apexFactor ?? profile.apexSpeedFactor
+    }
+
+    /// Beat-snap aggressiveness in [0,1]. 1.0 = hard snap to the nearest
+    /// beat (the prior behavior — that's why `nil` defaults to 1.0).
+    /// 0.0 = no snap (cut lands exactly on the energy anchor).
+    private var resolvedSnapAggressiveness: Double {
+        guard let t = template else { return 1.0 }
+        let raw = Double(t.beatSnapAggressiveness)
+        return min(1.0, max(0.0, raw))
     }
 
     func build(from plan: ReelPlan,
@@ -216,7 +242,14 @@ struct EditPlanBuilder {
             guard k > 0 else { return clip }
             let currentRendered = clip.sourceDuration * k
             let beats = max(2.0, (currentRendered / snapUnit).rounded())
-            let targetRendered = beats * snapUnit
+            let hardSnapRendered = beats * snapUnit
+            // Aggressiveness 0..1 blends between the un-snapped current
+            // rendered duration (chronological cut on the energy anchor)
+            // and the hard-snapped value (lands on a beat). 1.0 ≡ prior
+            // behavior. 0.3 → mostly chronological with a slight bias
+            // toward the beat. 0.0 → no snap at all.
+            let aggro = resolvedSnapAggressiveness
+            let targetRendered = currentRendered + (hardSnapRendered - currentRendered) * aggro
             let newSourceDur = targetRendered / k
 
             // Floor checks — keep unsnapped if any would be violated. Log the
@@ -319,16 +352,20 @@ struct EditPlanBuilder {
         let speed: SpeedCurve
         if settings.heroPacing {
             allowsRamp = (tier == .hero) && style.allowsSpeedRamps
+            // Template's apexFactor takes priority over settings.slowMoSpeed
+            // so the picked preset (e.g. aesthetic-slow 0.60 vs slowmo-
+            // cinematic 0.35) lands visibly in the rendered ramp.
+            let deepest = template?.speedRamp?.apexFactor ?? settings.slowMoSpeed
             speed = allowsRamp
                 ? rampedSpeedCurve(apexFraction: anchorFraction(in: sel),
-                                   deepestFactor: settings.slowMoSpeed)
+                                   deepestFactor: deepest)
                 : .realTime
         } else {
             allowsRamp = style.allowsSpeedRamps
                 && Float(e) >= profile.speedRampEnergyThreshold
             speed = allowsRamp
                 ? rampedSpeedCurve(apexFraction: anchorFraction(in: sel),
-                                   deepestFactor: profile.apexSpeedFactor)
+                                   deepestFactor: resolvedApexFactor)
                 : .realTime
         }
         let freeze: Double = (settings.heroPacing && tier == .hero) ? 0.3 : 0

@@ -296,6 +296,15 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
         let srcSize = image.size
         guard srcSize.width > 0, srcSize.height > 0 else { return image }
 
+        // CapCut-parity S6 — runtime assertion: every keyframe center
+        // reaching the compositor must live in normalized [0,1] space.
+        // Anything outside is a bug upstream (Vision/tracker/keyframe
+        // smoothing returned pixel coords by mistake). In debug we trap
+        // so the regression is found in CI; in release we clamp + log
+        // a warning so the user still ships a reel.
+        MetalPetalCompositor.assertNormalizedCenter(center,
+            context: "cropAndFit")
+
         let outAspect = outputSize.width / outputSize.height
         let srcAspect = srcSize.width / srcSize.height
 
@@ -543,6 +552,62 @@ final class MetalPetalCompositor: NSObject, AVVideoCompositing {
 
     private func clamp<T: Comparable>(_ v: T, lo: T, hi: T) -> T {
         min(max(v, lo), hi)
+    }
+
+    // MARK: - CapCut-parity S6 — normalized-coordinate runtime checks
+
+    /// Pure-predicate form — `true` when `p` is in normalized [0,1].
+    /// Exposed so tests can assert the predicate without driving the
+    /// assertion trap (which would crash XCTest in debug).
+    static func isNormalizedCenter(_ p: CGPoint) -> Bool {
+        (0...1).contains(p.x) && (0...1).contains(p.y)
+    }
+
+    /// Verifies a Vision/keyframe crop center is in normalized [0,1]
+    /// space. In debug builds trips `assertionFailure` so the upstream
+    /// regression surfaces in CI; in release logs a warning and lets
+    /// the caller's clamp keep the reel rolling.
+    static func assertNormalizedCenter(_ p: CGPoint,
+                                       context: String,
+                                       file: StaticString = #file,
+                                       line: UInt = #line) {
+        if !isNormalizedCenter(p) {
+            let msg = "\(context): keyframe center out of normalized [0,1] (x=\(p.x), y=\(p.y))"
+            #if DEBUG
+            assertionFailure(msg, file: file, line: line)
+            #else
+            Logger(subsystem: "com.playercut.app", category: "CoordAudit")
+                .warning("\(msg, privacy: .public)")
+            #endif
+        }
+    }
+
+    /// Pure-predicate form for CGRect — `true` when the rect lies in
+    /// normalized [0,1] space (x+w, y+h ≤ 1 with a 1e-4 tolerance for
+    /// float rounding).
+    static func isNormalizedRect(_ r: CGRect) -> Bool {
+        (0...1).contains(r.origin.x) && (0...1).contains(r.origin.y)
+            && (0...1).contains(r.size.width) && (0...1).contains(r.size.height)
+            && r.origin.x + r.size.width  <= 1.0001
+            && r.origin.y + r.size.height <= 1.0001
+    }
+
+    /// Same check for a normalized CGRect (x, y, w, h all in [0,1] and
+    /// x+w, y+h ≤ 1). Used by tests that drive synthetic out-of-range
+    /// boxes through the assertion path.
+    static func assertNormalizedRect(_ r: CGRect,
+                                     context: String,
+                                     file: StaticString = #file,
+                                     line: UInt = #line) {
+        if !isNormalizedRect(r) {
+            let msg = "\(context): crop rect out of normalized [0,1] (\(r))"
+            #if DEBUG
+            assertionFailure(msg, file: file, line: line)
+            #else
+            Logger(subsystem: "com.playercut.app", category: "CoordAudit")
+                .warning("\(msg, privacy: .public)")
+            #endif
+        }
     }
 }
 

@@ -51,6 +51,12 @@ struct SettingsView: View {
     // Templates — system-wide default ("" = system fallback, per-player
     // default wins regardless).
     @AppStorage(ReelSettingsKeys.selectedTemplateID) private var selectedTemplateID = ""
+    // BYO music — picker state + last error.
+    @State private var presentingMusicImport = false
+    @State private var musicImportError: String?
+    /// Refresh trigger — bumped after import/delete so the imported-tracks
+    /// list re-reads MusicImportManager (a non-observable @MainActor class).
+    @State private var musicLibraryRevision = 0
 
     var body: some View {
         NavigationStack {
@@ -257,6 +263,80 @@ struct SettingsView: View {
                                 .accessibilityIdentifier("stage1-use-pose")
                         }
 
+                        // BYO music — UIDocumentPicker import, list, delete.
+                        sectionHeader("Your music")
+                        reelCard {
+                            Button {
+                                Haptic.tap()
+                                musicImportError = nil
+                                presentingMusicImport = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "plus.circle.fill")
+                                    Text("Add your own track")
+                                    Spacer()
+                                }
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Theme.accent)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("music-import-add")
+
+                            if let err = musicImportError {
+                                Text(err)
+                                    .font(.pcCaption)
+                                    .foregroundStyle(.red)
+                            }
+
+                            let imports = MusicImportManager.shared.tracks
+                                .sorted(by: { $0.importedAt > $1.importedAt })
+                            if imports.isEmpty {
+                                Text("Imported tracks appear here.")
+                                    .font(.pcCaption)
+                                    .foregroundStyle(Theme.textSecondary)
+                            } else {
+                                ForEach(imports) { track in
+                                    HStack(spacing: 8) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(track.displayName)
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundStyle(Theme.textPrimary)
+                                                .lineLimit(1)
+                                            HStack(spacing: 6) {
+                                                Text("IMPORTED")
+                                                    .font(.system(size: 9, weight: .bold))
+                                                    .tracking(0.5)
+                                                    .padding(.horizontal, 5)
+                                                    .padding(.vertical, 2)
+                                                    .background(Theme.accent.opacity(0.25),
+                                                                in: Capsule())
+                                                    .foregroundStyle(Theme.accent)
+                                                Text("\(track.vibe.displayName) · \(track.bpm.map { "\($0) BPM" } ?? "BPM ?")")
+                                                    .font(.pcCaption)
+                                                    .foregroundStyle(Theme.textSecondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        Button {
+                                            Haptic.tap()
+                                            MusicImportManager.shared.remove(id: track.id)
+                                            musicLibraryRevision += 1
+                                        } label: {
+                                            Image(systemName: "trash")
+                                                .foregroundStyle(.red)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityIdentifier("music-import-delete-\(track.id)")
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                            }
+                            Text("You are responsible for the licenses of any content you import. PlayerCut does not redistribute imported files.")
+                                .font(.pcCaption)
+                                .foregroundStyle(Theme.textSecondary)
+                        }
+                        .id(musicLibraryRevision)   // force re-eval after import
+
                         // Templates — system-wide default template. Per-
                         // player default lives on PlayerProfile (set from
                         // the enrollment editor); this picker is the
@@ -302,6 +382,21 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $presentingDiagnostics) {
                 DiagnosticsView()
+            }
+            .sheet(isPresented: $presentingMusicImport) {
+                MusicImportPicker { pickedURL in
+                    presentingMusicImport = false
+                    guard let url = pickedURL else { return }
+                    Task { @MainActor in
+                        do {
+                            _ = try await MusicImportManager.shared
+                                .importTrack(from: url)
+                            musicLibraryRevision += 1
+                        } catch {
+                            musicImportError = error.localizedDescription
+                        }
+                    }
+                }
             }
         }
     }
