@@ -18,9 +18,15 @@
 import SwiftUI
 
 /// The choices made on the pre-record sheet, handed to CaptureView.
+/// `templateID` carries the user's preset pick — the orchestrator
+/// resolves it to a full `ReelTemplate` at compose time. `vibe` is
+/// derived from the template so MusicLibrary picks from the matching
+/// pool; we keep it on the struct for back-compat with existing
+/// callers that read `choice.vibe`.
 struct PreRecordChoice {
     let length: ReelLength
     let vibe: MusicVibe
+    let templateID: String
 }
 
 struct PreRecordSheet: View {
@@ -29,7 +35,7 @@ struct PreRecordSheet: View {
     var onCancel: () -> Void
 
     @State private var reelLength: ReelLength
-    @State private var musicVibe: MusicVibe
+    @State private var selectedTemplateID: String
 
     init(player: PlayerEnrollment,
          onContinue: @escaping (PreRecordChoice) -> Void,
@@ -38,7 +44,16 @@ struct PreRecordSheet: View {
         self.onContinue = onContinue
         self.onCancel = onCancel
         _reelLength = State(initialValue: player.reelLengthPreference)
-        _musicVibe = State(initialValue: player.musicVibe)
+        // Initial template pick: player default → last-used (ReelSettings) →
+        // system default. Mirrors TemplateRegistry.resolve so what the user
+        // sees pre-selected is what would have been applied anyway.
+        let initialID: String = {
+            if let id = player.defaultTemplateID, !id.isEmpty { return id }
+            let stored = ReelSettings.current.selectedTemplateID
+            if !stored.isEmpty { return stored }
+            return TemplateRegistry.defaultTemplateID
+        }()
+        _selectedTemplateID = State(initialValue: initialID)
     }
 
     private let tips: [(icon: String, text: String)] = [
@@ -60,7 +75,7 @@ struct PreRecordSheet: View {
                             .foregroundStyle(Theme.textSecondary)
 
                         reelLengthSection
-                        musicVibeSection
+                        templateGallerySection
                         quickTipsSection
                     }
                     .padding(20)
@@ -73,7 +88,17 @@ struct PreRecordSheet: View {
                              tint: Theme.primary,
                              height: 64) {
                     Haptic.tap()
-                    onContinue(PreRecordChoice(length: reelLength, vibe: musicVibe))
+                    // Persist the user's template pick to ReelSettings so
+                    // the orchestrator + Settings → Templates see the
+                    // same selection on the next session.
+                    UserDefaults.standard.set(
+                        selectedTemplateID,
+                        forKey: ReelSettingsKeys.selectedTemplateID)
+                    let vibe = TemplateRegistry.shared.get(id: selectedTemplateID)?.musicVibe
+                        ?? player.musicVibe
+                    onContinue(PreRecordChoice(
+                        length: reelLength, vibe: vibe,
+                        templateID: selectedTemplateID))
                 }
                 .accessibilityIdentifier("prerecord-continue")
                 .padding(.horizontal, 20)
@@ -115,33 +140,61 @@ struct PreRecordSheet: View {
         }
     }
 
-    private var musicVibeSection: some View {
+    private var templateGallerySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Music vibe")
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
-                      spacing: 12) {
-                ForEach(MusicVibe.allCases, id: \.self) { vibe in
-                    Button {
-                        Haptic.tap()
-                        musicVibe = vibe
-                    } label: {
-                        Text(vibe.displayName)
-                            .font(.system(size: 16, weight: .bold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(musicVibe == vibe ? Theme.primary : Theme.bgCard,
-                                        in: RoundedRectangle(cornerRadius: Theme.Radius.card))
-                            .foregroundStyle(musicVibe == vibe ? .white : Theme.textPrimary)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: Theme.Radius.card)
-                                    .stroke(musicVibe == vibe ? Theme.accent : .clear,
-                                            lineWidth: 2))
+            sectionHeader("Style")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(TemplateRegistry.shared.list()) { template in
+                        templateTile(template)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("prerecord-vibe-\(vibe.rawValue)")
                 }
+                .padding(.horizontal, 2)  // breathing room for the focus ring
+            }
+            .accessibilityIdentifier("prerecord-template-gallery")
+        }
+    }
+
+    private func templateTile(_ template: ReelTemplate) -> some View {
+        let isSelected = selectedTemplateID == template.id
+        let isPlayerDefault = (player.defaultTemplateID == template.id)
+        return Button {
+            Haptic.tap()
+            selectedTemplateID = template.id
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: template.thumbnailAsset)
+                    .font(.system(size: 38, weight: .light))
+                    .foregroundStyle(isSelected ? .white : Theme.textPrimary)
+                    .frame(width: 110, height: 140)
+                    .background(isSelected ? Theme.primary : Theme.bgCard,
+                                in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.card)
+                            .stroke(isSelected ? Theme.accent : .clear,
+                                    lineWidth: 3))
+                    .overlay(alignment: .topTrailing) {
+                        if isPlayerDefault {
+                            Text("DEFAULT")
+                                .font(.system(size: 9, weight: .heavy))
+                                .tracking(0.8)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Theme.accent, in: Capsule())
+                                .foregroundStyle(.black)
+                                .padding(6)
+                        }
+                    }
+                Text(template.displayName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 110)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
             }
         }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("prerecord-template-\(template.id)")
     }
 
     private var quickTipsSection: some View {

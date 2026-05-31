@@ -48,6 +48,9 @@ struct SettingsView: View {
     // CapCut-parity S5 — Stage 1 debug
     @AppStorage(ReelSettingsKeys.forceSceneType)   private var forceSceneTypeRaw = SceneOverride.auto.rawValue
     @AppStorage(ReelSettingsKeys.usePoseSignal)    private var usePoseSignal = true
+    // Templates — system-wide default ("" = system fallback, per-player
+    // default wins regardless).
+    @AppStorage(ReelSettingsKeys.selectedTemplateID) private var selectedTemplateID = ""
 
     var body: some View {
         NavigationStack {
@@ -252,6 +255,26 @@ struct SettingsView: View {
                             Toggle("Use pose signal", isOn: $usePoseSignal)
                                 .tint(Theme.accent)
                                 .accessibilityIdentifier("stage1-use-pose")
+                        }
+
+                        // Templates — system-wide default template. Per-
+                        // player default lives on PlayerProfile (set from
+                        // the enrollment editor); this picker is the
+                        // global fallback when no player default is set.
+                        sectionHeader("Default template")
+                        reelCard {
+                            Picker("Template", selection: $selectedTemplateID) {
+                                Text("System default")
+                                    .tag("")
+                                ForEach(TemplateRegistry.shared.list()) { t in
+                                    Text(t.displayName).tag(t.id)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .accessibilityIdentifier("settings-template-picker")
+                            Text("Used when the player has no per-profile default. Tap a tile on the pre-record sheet to override per game.")
+                                .font(.pcCaption)
+                                .foregroundStyle(Theme.textSecondary)
                         }
 
                         Text("PlayerCut never stores your child's video. Reels live in your Photos. Raw recordings are deleted the moment the reel is made.")
