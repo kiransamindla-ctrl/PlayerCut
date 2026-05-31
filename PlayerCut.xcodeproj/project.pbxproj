@@ -14,6 +14,7 @@
 		0E5C27E975B2699BD014FD49 /* playful_4.m4a in Resources */ = {isa = PBXBuildFile; fileRef = E08F0C100BC9E17C6655F0DB /* playful_4.m4a */; };
 		0FC9032864AA8E4B8B2E7CD7 /* energetic_1.m4a in Resources */ = {isa = PBXBuildFile; fileRef = B70DAA99125026BF576476D0 /* energetic_1.m4a */; };
 		13AD1EEE94B157E668FA9557 /* chill_4.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 5D7E383A9AD798A79E60EDA1 /* chill_4.m4a */; };
+		145EAE52E7CE661FA2131C89 /* TemplateE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 561ED0AD9C5FAC56A615DEBD /* TemplateE2ETests.swift */; };
 		14DE0C158DDF9DA52752DF6D /* energetic_2.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 939ADF876D5541894BCB1FE1 /* energetic_2.m4a */; };
 		15DB9DEE7017F9FF9C5D8FEC /* SampleVideoFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6A803F76A9A50B91E65A996 /* SampleVideoFactory.swift */; };
 		18913596144C9B8A95934FA4 /* energetic_4.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D96C19CAB4C6756DC0E3A0CE /* energetic_4.m4a */; };
@@ -155,6 +156,7 @@
 		4860CE2164ADF75EB19A533A /* Stage2PlayerLocalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stage2PlayerLocalizer.swift; sourceTree = "<group>"; };
 		4C2F67EF93E25FB1B9119042 /* Configuration.storekit */ = {isa = PBXFileReference; path = Configuration.storekit; sourceTree = "<group>"; };
 		4C653CF2C73129FFD1E90355 /* energetic_3.m4a */ = {isa = PBXFileReference; path = energetic_3.m4a; sourceTree = "<group>"; };
+		561ED0AD9C5FAC56A615DEBD /* TemplateE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateE2ETests.swift; sourceTree = "<group>"; };
 		5B9209D6081BE50130FEE217 /* ReelQualityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelQualityTests.swift; sourceTree = "<group>"; };
 		5D7E383A9AD798A79E60EDA1 /* chill_4.m4a */ = {isa = PBXFileReference; path = chill_4.m4a; sourceTree = "<group>"; };
 		5EF92EE722574193DFC45FD7 /* DeviceCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceCapabilities.swift; sourceTree = "<group>"; };
@@ -363,6 +365,7 @@
 				E6A803F76A9A50B91E65A996 /* SampleVideoFactory.swift */,
 				CA52F250C481A8DD4DC73271 /* SampleVideoPipelineTests.swift */,
 				F25B19609EF850B4C81711AA /* SubjectFollowTests.swift */,
+				561ED0AD9C5FAC56A615DEBD /* TemplateE2ETests.swift */,
 				2C8A442243A24BA4C0ACC8EF /* TemplateRegistryTests.swift */,
 				33A6BDFC34EA484A0E009C35 /* TitleFrameTests.swift */,
 			);
@@ -811,6 +814,7 @@
 				15DB9DEE7017F9FF9C5D8FEC /* SampleVideoFactory.swift in Sources */,
 				BF8B13FA4269D5894C957255 /* SampleVideoPipelineTests.swift in Sources */,
 				1BE0CF976A14B5F6626FB6E6 /* SubjectFollowTests.swift in Sources */,
+				145EAE52E7CE661FA2131C89 /* TemplateE2ETests.swift in Sources */,
 				3777FFD6DD8841203CF583A5 /* TemplateRegistryTests.swift in Sources */,
 				99FC3195A65665B088EC612C /* TitleFrameTests.swift in Sources */,
 			);
