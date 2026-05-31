@@ -121,6 +121,7 @@
 		DDC3E9FAFA99C2AD358D06EC /* PipelinePerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AEAA6FC030D67BD914B18FB /* PipelinePerformanceTests.swift */; };
 		E1C3A2B0607A679EBB1C4545 /* energetic_5.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D8B7CDD2F57151DEE09FBF11 /* energetic_5.m4a */; };
 		E2867AA2B612744DAFC97438 /* PHVideoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B37614D9B6F0A4EE67D0C78 /* PHVideoPicker.swift */; };
+		E42085B1D2ED612CEBD899D0 /* LeakAssertionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4E5646554481F82BFDFA63 /* LeakAssertionTests.swift */; };
 		E4A4646E625892B7006DBAC6 /* epic-highlight.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 0C2BE95856A9E28E54E9D4AC /* epic-highlight.jpg */; };
 		E8AB26D4660F746EA794A002 /* playful_3.m4a in Resources */ = {isa = PBXBuildFile; fileRef = A60E528928A013776B111E82 /* playful_3.m4a */; };
 		EF489A6C0D500E5FE09A091C /* cinematic_3.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D092DEBAB329D84B16B947C4 /* cinematic_3.m4a */; };
@@ -206,6 +207,7 @@
 		77AB529F38C7A77341C536A9 /* chill_5.m4a */ = {isa = PBXFileReference; path = chill_5.m4a; sourceTree = "<group>"; };
 		77C451731CCFC9AEE7E5CE22 /* PlayerCut.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PlayerCut.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7B724C180C9D764514547CD9 /* Templates.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = Templates.json; sourceTree = "<group>"; };
+		7F4E5646554481F82BFDFA63 /* LeakAssertionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeakAssertionTests.swift; sourceTree = "<group>"; };
 		80F5CB7C209C8CB34BC4D158 /* AudioPeakDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioPeakDetector.swift; sourceTree = "<group>"; };
 		836B46F23454E6CA08016C67 /* ReelSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelSettings.swift; sourceTree = "<group>"; };
 		847E5DCEBB4A6DAB1167F854 /* ReelTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReelTemplate.swift; sourceTree = "<group>"; };
@@ -404,6 +406,7 @@
 				5F4A4B71D8E971A80AF66723 /* CompositionTests.swift */,
 				652BB15D1BD3FE399AA8B369 /* CoordinateAuditTests.swift */,
 				215BC0C3EDC8C14473879D32 /* ExportTempoTests.swift */,
+				7F4E5646554481F82BFDFA63 /* LeakAssertionTests.swift */,
 				264956D2D37CEB8DA4305518 /* MusicImportTests.swift */,
 				B281744EE6A34344813755C7 /* ParticleOptInTests.swift */,
 				8AEAA6FC030D67BD914B18FB /* PipelinePerformanceTests.swift */,
@@ -894,6 +897,7 @@
 				C64DC90B62B7DE166E378DFE /* CompositionTests.swift in Sources */,
 				9D746D13194C5228B1061AF0 /* CoordinateAuditTests.swift in Sources */,
 				28960BFCBEFDD98BA916DF3F /* ExportTempoTests.swift in Sources */,
+				E42085B1D2ED612CEBD899D0 /* LeakAssertionTests.swift in Sources */,
 				D562CE2D8DEE00B3C771F50F /* MusicImportTests.swift in Sources */,
 				F64F8BDB1AB46D3912634B6D /* ParticleOptInTests.swift in Sources */,
 				DDC3E9FAFA99C2AD358D06EC /* PipelinePerformanceTests.swift in Sources */,
