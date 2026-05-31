@@ -288,7 +288,9 @@ actor PipelineOrchestrator {
                         style: style,
                         output: output,
                         sourceDuration: videoDuration,
-                        profile: perfProfile)
+                        profile: perfProfile,
+                        settings: settings,
+                        template: resolvedTemplate)
                     // Music — picked per (player, vibe) with LRU
                     // rotation. The orchestrator's musicURL: nil arg
                     // means "let the library pick"; an explicit URL
