@@ -118,6 +118,7 @@
 		D79DD14CD5848001DA281836 /* MetalPetalCompositor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D013E23F01E91D1ECCB2565 /* MetalPetalCompositor.swift */; };
 		DB19202F0F7C740BCF51A698 /* DiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66D00ECD5C55F39FB0B691F9 /* DiagnosticsView.swift */; };
 		DC60D646A65ABD22462F8979 /* BPMDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1AA741B7A64E6E01FEA4FC8 /* BPMDetector.swift */; };
+		DDC3E9FAFA99C2AD358D06EC /* PipelinePerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AEAA6FC030D67BD914B18FB /* PipelinePerformanceTests.swift */; };
 		E1C3A2B0607A679EBB1C4545 /* energetic_5.m4a in Resources */ = {isa = PBXBuildFile; fileRef = D8B7CDD2F57151DEE09FBF11 /* energetic_5.m4a */; };
 		E2867AA2B612744DAFC97438 /* PHVideoPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B37614D9B6F0A4EE67D0C78 /* PHVideoPicker.swift */; };
 		E4A4646E625892B7006DBAC6 /* epic-highlight.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 0C2BE95856A9E28E54E9D4AC /* epic-highlight.jpg */; };
@@ -215,6 +216,7 @@
 		89669F68F7A20A0292EC91BE /* viral-tiktok.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "viral-tiktok.jpg"; sourceTree = "<group>"; };
 		89BB15539399A68558E69DBD /* DeviceClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceClass.swift; sourceTree = "<group>"; };
 		8A630CB65E89E2314087FE35 /* PlayerCutApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerCutApp.swift; sourceTree = "<group>"; };
+		8AEAA6FC030D67BD914B18FB /* PipelinePerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelinePerformanceTests.swift; sourceTree = "<group>"; };
 		8E4E0BCE84AA1C371A675620 /* PermissionsPrimerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsPrimerView.swift; sourceTree = "<group>"; };
 		939ADF876D5541894BCB1FE1 /* energetic_2.m4a */ = {isa = PBXFileReference; path = energetic_2.m4a; sourceTree = "<group>"; };
 		99CD75C3C4488657399E44F3 /* DiagnosticsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsStore.swift; sourceTree = "<group>"; };
@@ -404,6 +406,7 @@
 				215BC0C3EDC8C14473879D32 /* ExportTempoTests.swift */,
 				264956D2D37CEB8DA4305518 /* MusicImportTests.swift */,
 				B281744EE6A34344813755C7 /* ParticleOptInTests.swift */,
+				8AEAA6FC030D67BD914B18FB /* PipelinePerformanceTests.swift */,
 				CA0F8A80B4A9C591C60B82B5 /* PlayerCutTests.swift */,
 				5B9209D6081BE50130FEE217 /* ReelQualityTests.swift */,
 				E6A803F76A9A50B91E65A996 /* SampleVideoFactory.swift */,
@@ -893,6 +896,7 @@
 				28960BFCBEFDD98BA916DF3F /* ExportTempoTests.swift in Sources */,
 				D562CE2D8DEE00B3C771F50F /* MusicImportTests.swift in Sources */,
 				F64F8BDB1AB46D3912634B6D /* ParticleOptInTests.swift in Sources */,
+				DDC3E9FAFA99C2AD358D06EC /* PipelinePerformanceTests.swift in Sources */,
 				85DCFCCA63858A8469FDE82E /* PlayerCutTests.swift in Sources */,
 				F5900BE0B10F11DDF6A39008 /* ReelQualityTests.swift in Sources */,
 				15DB9DEE7017F9FF9C5D8FEC /* SampleVideoFactory.swift in Sources */,
