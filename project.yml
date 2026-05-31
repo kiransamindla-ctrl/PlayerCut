@@ -104,6 +104,13 @@ schemes:
       gatherCoverageData: true
       coverageTargets:
         - PlayerCut
+      # ASan + UBSan on the default scheme. Catches:
+      # - OOB / use-after-free in the Metal/Vision/AVFoundation pointer bridges
+      # - signed overflow + misalignment in vDSP/DSP code
+      # TSan lives on the sibling PlayerCut-TSan scheme — sanitizers are
+      # mutually exclusive at run time, so we can't enable both here.
+      enableAddressSanitizer: true
+      enableUBSanitizer: true
       targets:
         - PlayerCutTests
         - PlayerCutUITests
@@ -113,3 +120,14 @@ schemes:
       config: Debug
     archive:
       config: Release
+  # Race-detector scheme — same targets as PlayerCut, TSan on.
+  # Run via: xcodebuild test -scheme PlayerCut-TSan ...
+  PlayerCut-TSan:
+    build:
+      targets:
+        PlayerCut: all
+    test:
+      config: Debug
+      enableThreadSanitizer: true
+      targets:
+        - PlayerCutTests
