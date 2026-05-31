@@ -113,4 +113,17 @@ enum ParticleKind: String, Codable, CaseIterable {
     /// Slow-falling dust motes in a warm key light — used by
     /// "aesthetic-slow" (in addition to its background pop).
     case dust
+
+    /// Final composite opacity applied to the procedural particle
+    /// texture. Capped at 0.30 per spec so particles never obscure
+    /// the subject. Grain reads at the lowest opacity (it should sit
+    /// just under perception).
+    var compositeAlpha: CGFloat {
+        switch self {
+        case .filmGrain: return 0.18
+        case .dust:      return 0.22
+        case .sparkle:   return 0.28
+        case .lensFlare: return 0.30
+        }
+    }
 }
