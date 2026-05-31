@@ -32,6 +32,7 @@
 		30146C06C5905FE650F30654 /* BeaconScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48412ECA01A56EBE2AB0F81D /* BeaconScanner.swift */; };
 		31950D1B33BB9E98E25A64E7 /* playful_1.m4a in Resources */ = {isa = PBXBuildFile; fileRef = 633792CC35061969E97C24D8 /* playful_1.m4a */; };
 		35DCAD1741F0658F1E7A7A96 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D2681A707E5F6ADB32F39D /* WelcomeView.swift */; };
+		3631166EB2622340F68AD2BF /* BPMManifestRebuildTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49BB32AE2EBF32829C026F54 /* BPMManifestRebuildTests.swift */; };
 		3777FFD6DD8841203CF583A5 /* TemplateRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C8A442243A24BA4C0ACC8EF /* TemplateRegistryTests.swift */; };
 		3B116C589A57AA4058008133 /* DeviceClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BB15539399A68558E69DBD /* DeviceClass.swift */; };
 		3DA88A3B235D305C4878A78A /* AnalysisFrameReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12021677A2B9EA6E2EAE4290 /* AnalysisFrameReader.swift */; };
@@ -155,6 +156,7 @@
 		46CCE07A6E2B577DADAF5544 /* LUTFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LUTFactory.swift; sourceTree = "<group>"; };
 		48412ECA01A56EBE2AB0F81D /* BeaconScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BeaconScanner.swift; sourceTree = "<group>"; };
 		4860CE2164ADF75EB19A533A /* Stage2PlayerLocalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Stage2PlayerLocalizer.swift; sourceTree = "<group>"; };
+		49BB32AE2EBF32829C026F54 /* BPMManifestRebuildTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BPMManifestRebuildTests.swift; sourceTree = "<group>"; };
 		4C2F67EF93E25FB1B9119042 /* Configuration.storekit */ = {isa = PBXFileReference; path = Configuration.storekit; sourceTree = "<group>"; };
 		4C653CF2C73129FFD1E90355 /* energetic_3.m4a */ = {isa = PBXFileReference; path = energetic_3.m4a; sourceTree = "<group>"; };
 		561ED0AD9C5FAC56A615DEBD /* TemplateE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemplateE2ETests.swift; sourceTree = "<group>"; };
@@ -358,6 +360,7 @@
 			children = (
 				C4AC91960D65A532C7331F4E /* AnalysisFrameReaderTests.swift */,
 				4359A84AF81C2A474BF8D802 /* BPMDetectorTests.swift */,
+				49BB32AE2EBF32829C026F54 /* BPMManifestRebuildTests.swift */,
 				5F4A4B71D8E971A80AF66723 /* CompositionTests.swift */,
 				652BB15D1BD3FE399AA8B369 /* CoordinateAuditTests.swift */,
 				215BC0C3EDC8C14473879D32 /* ExportTempoTests.swift */,
@@ -808,6 +811,7 @@
 			files = (
 				CACDE05E8B3D03593893DB93 /* AnalysisFrameReaderTests.swift in Sources */,
 				91A196C14884DAA941329F6B /* BPMDetectorTests.swift in Sources */,
+				3631166EB2622340F68AD2BF /* BPMManifestRebuildTests.swift in Sources */,
 				C64DC90B62B7DE166E378DFE /* CompositionTests.swift in Sources */,
 				9D746D13194C5228B1061AF0 /* CoordinateAuditTests.swift in Sources */,
 				28960BFCBEFDD98BA916DF3F /* ExportTempoTests.swift in Sources */,

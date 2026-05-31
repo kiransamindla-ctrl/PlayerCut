@@ -77,15 +77,16 @@ enum BPMDetector {
                 return Result(bpm: fallbackBPM, confidence: 0, didFallback: true)
             }
             let r = await detect(asset: asset, audioTrack: audio)
-            // CapCut-parity S8 — diagnostic when our detector disagrees
-            // with a manifest BPM by more than 5. Lets us surface the
-            // 1/20 outlier (energetic_1) and any other future drift to
-            // the engineer + the user without changing the detector or
-            // the manifest in code.
+            // S8 + PR #10 — manifest.json is now seeded from this same
+            // detector (BPMManifestRebuildTests, 2026-05-31), so any
+            // divergence > 2 BPM means the detector's output drifted
+            // since the last manifest rebuild. Tighter threshold than
+            // the prior >5; same code path. Fires only on bundled tracks
+            // (manifest lookup returns nil for BYO imports).
             if let manifestBPM = manifestBPM(forID: url.deletingPathExtension().lastPathComponent),
-               abs(Double(manifestBPM) - r.bpm) > 5,
+               abs(Double(manifestBPM) - r.bpm) > 2,
                !r.didFallback {
-                logger.warning("BPMDetect: manifest divergence for \(url.lastPathComponent, privacy: .public) — manifest=\(manifestBPM) detected=\(r.bpm, format: .fixed(precision: 1)) (Δ=\(abs(Double(manifestBPM) - r.bpm), format: .fixed(precision: 1)))")
+                logger.warning("BPMDetect: manifest divergence for \(url.lastPathComponent, privacy: .public) — manifest=\(manifestBPM) detected=\(r.bpm, format: .fixed(precision: 1)) (Δ=\(abs(Double(manifestBPM) - r.bpm), format: .fixed(precision: 1))). Re-run BPMManifestRebuildTests to refresh.")
             }
             return r
         } catch {
